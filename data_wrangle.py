@@ -14,6 +14,7 @@ class DataTable:
         self.conn=sqlite3.connect(db_path)
         self.cursor=self.conn.cursor()
 
+        #Object must be initialized with a dataTABLE
         if table_name is None:
             stmt=('A table must be selected for the Object to be initialized.\nAvailable tables:')
             tables=self.query('SELECT name FROM sqlite_master WHERE type=\'table\';')
@@ -22,12 +23,13 @@ class DataTable:
             for table in tables:
                 stmt+=f'\n\t{table[0]}'
             print(stmt)
-
         self.table=table_name
+        
         self.x='raman_shift' #Database table name where 'x' values are stored
         self.y='original_intensity'
         self.id='id' #Database table column name where spectra specific 'id' valuesare stored
 
+        #Optional condition for Query searchs
         self.condition=None
             
     def query(self,stmt,fetch=True):
@@ -39,6 +41,26 @@ class DataTable:
             return None
 
     def columns(self,*incols):
+        """
+        Returns information about the columns in the current database table.
+        
+        Parameters:
+            *incols (str): Optional; column names to display unique values for.
+            
+        Returns:
+            cols (list): List of strings representing the column names.
+            table (prettytable.PrettyTable): Table object displaying column info.
+            
+        This method uses the `PRAGMA table_info` SQL statement to retrieve information
+        about the columns in the current table, including name, data type, whether it 
+        allows NULL values, and whether it is part of the primary key. It then executes 
+        a SELECT COUNT(DISTINCT col_name) statement for each column to determine the number 
+        of unique values in that column. Finally, it creates a `prettytable.PrettyTable` 
+        object to display this information in a readable format.
+        
+        If one or more column names are passed as arguments, the method also displays the 
+        unique values in those columns using a SELECT DISTINCT statement.
+        """
         columns=self.query(f'PRAGMA table_info({self.table})')
         cols=[col[1] for col in columns]
         
@@ -53,26 +75,26 @@ class DataTable:
             # col_info.append(unique_vals_per_column[0][0])
             col_info.insert(2,unique_vals_per_column[0][0])
             table.add_row(col_info)
+
         if len(incols)>0:
             for col in incols:
-                uniques=self.query(f'SELECT DISTINCT {col} FROM {self.table}')
-                # print(uniques)
+                uniques=self.query(f'SELECT DISTINCT {col} FROM {self.table}') #Checks the 'col' in 'table', grabs each distinct values that appears
                 stmt=f'\nValues in {col}:'
                 for u in uniques:
                     stmt+=f'\n\t{u[0]}'
-                    # print(u[0])
-                    # if len(u[0])<=1:
-                        # print(u[0])
-                    # else:
-                        # print(u[0])
-                        # [print(f'{u[0]}') for i in list(range(len(u[0])))]
+                    print(u[0])
+                    if len(u[0])<=1:
+                        print(u[0])
+                    else:
+                        print(u[0])
+                        [print(f'{u[0]}') for i in list(range(len(u[0])))]
                         # [print(f'{u[0]}') for ]
-                        # print(list(range(len(u[0]))))
-                        # print(u)
-                        # stmt=+[f'{u[0]}' for i in list(range(len(u[0])))]
-                    # print(len(u[0]))
-                    # print(type(u))
-                    # stmt+=f'\t{u[0]}'
+                        print(list(range(len(u[0]))))
+                        print(u)
+                        stmt=+[f'{u[0]}' for i in list(range(len(u[0])))]
+                    print(len(u[0]))
+                    print(type(u))
+                    stmt+=f'\t{u[0]}'
                 print(stmt)
 
         return cols,table
@@ -87,7 +109,7 @@ class DataTable:
         #row information
         stmt=f'SELECT COUNT(*) FROM {self.table}'
         self.cursor.execute(stmt)
-        rows=self.cursor.fetchone() #num_rows = f'Number of rows: {len(rows)}'
+        rows=self.cursor.fetchone() #num_rows = f'Number of rows: {len(rows)}'?
 
         #Display info
         print(f'DATATABLE INFORMATION')
@@ -142,63 +164,6 @@ class DataTable:
 
         t=np.frombuffer(byte_data,dtype=np.int64)
         return t
-
-
-    def raman_shifts(self, table_col_name='raman_shift', table_col_id='id'):
-        #DELETE#
-        '''table_col_name = name of column in data table were x data is.
-            table_col_id = name of column in data table where unique identifier for each individual spectra is.
-            ***Add qualities for query search***
-        '''
-        #Grab data from DB
-        rawres=self.query(f'SELECT {table_col_id}, {table_col_name} FROM {self.table}')
-        # print(rawres[0][1])
-        #Convert byte data in raw tuples to list data
-        tup_list=[(tup[0],self.blob2list(tup[1])) for tup in rawres]
-        # return tup_list
-
-        #Convert tuples list to dictionary
-        data_dict={t[0]:t[1] for t in tup_list} #(id,[xs values])
-        # for d in data_dict:
-            # print(d)
-            # print(data_dict[d])
-            # print()
-        # return data_dict
-        ###Compare xs, look for outliers
-        #Create a DF from the dictionary
-        df=pd.DataFrame.from_dict(data_dict,orient='index') #Columns = rs index, index=sampleID (int)
-        # print(df)
-        #Calc per Column (Raman Shift)
-        mean=df.mean() #Series of means per Raman Shift
-        std=df.std() #Series of stds per Raman Shift
-        #Define a threshold for IDing outliers
-        threshold=2.0
-        #ID the outliers for each column
-        outliers=(np.abs(df-mean) >  threshold*std)
-        #Print results of comparison if there are outliers
-        for column in df.columns: #Check each column (each Raman Shift)
-            column_outliers = outliers[column] #Check if there is an outlier, if there is, add it to this list as TRUE
-            # print(type(column_outliers))
-            print(column_outliers.index[column_outliers])
-            # print(column_outliers)
-            # print(df)
-            if column_outliers.any(): #If outlier is detected... generate alert message
-                outlier_values = df.loc[column_outliers, column].values #np.array of outlier values PER COLUMN
-                # print(outlier_values)
-            #     table=pt(['Raman Shift Value','Sample ID'])
-            #     table.title=f'Outlier(s) in column **{column}**'
-            #     for val in outlier_values: #For each outlier detected in the column
-            #         ind=df.loc[df.iloc[:,column]==val].index[0] #Grab index (sampleID) of the outlier
-            #         table.add_row([val,ind]) #Display the outlier value and the sampleID
-            #     print(table)
-        return mean
-    
-    # def data_from_db(self,table_col_name, table_col_id, condition=None):
-    #     if condition:
-    #         stmt=f'SELECT {table_col_id}, {table_col_name} FROM {self.table} WHERE {condition}'
-    #     else:
-    #         stmt=f'SELECT {table_col_id}, {table_col_name} FROM {self.table}'
-
     
     def raman_shifts(self):#, table_col_name='raman_shift', table_col_id='id'):
         '''table_col_name = name of column in data table were x data is.
