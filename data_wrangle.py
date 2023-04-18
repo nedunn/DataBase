@@ -18,6 +18,7 @@ class DataTable:
         if table_name is None:
             stmt=('A table must be selected for the Object to be initialized.\nAvailable tables:')
             tables=self.query('SELECT name FROM sqlite_master WHERE type=\'table\';')
+
             stmt=(f'A table must be selected for the Object to be initialized.\nAvailable tables ({len(tables)}):')
             # [stmt+=f'\n\t{t}' for t in res]
             for table in tables:
@@ -40,87 +41,106 @@ class DataTable:
             res = self.cursor.execute(f'{stmt}')
             return None
 
-    def columns(self,*incols):
+    def columns(self):
+        '''Returns a list of column names in the current database table.'''
+        columns=self.query(f'PRAGMA table_info({self.table})')
+        cols=[col[1] for col in columns]
+        return cols
+
+    def col_info(self, *incols):
         """
         Returns information about the columns in the current database table.
-        
-        Parameters:
+
+        Args:
             *incols (str): Optional; column names to display unique values for.
-            
+
         Returns:
-            cols (list): List of strings representing the column names.
-            table (prettytable.PrettyTable): Table object displaying column info.
-            
+            Union[prettytable.PrettyTable, Tuple[prettytable.PrettyTable, List[prettytable.PrettyTable]]]: 
+            If no column names are passed as arguments, returns a `prettytable.PrettyTable` object 
+            displaying column information such as name, data type, whether it allows NULL values, 
+            whether it is part of the primary key, and the number of unique values in each column.
+            If one or more column names are passed as arguments, returns a tuple of two `prettytable.PrettyTable` 
+            objects. The first one displays column information, and the second one displays unique values 
+            for each of the specified columns.
+
         This method uses the `PRAGMA table_info` SQL statement to retrieve information
-        about the columns in the current table, including name, data type, whether it 
-        allows NULL values, and whether it is part of the primary key. It then executes 
-        a SELECT COUNT(DISTINCT col_name) statement for each column to determine the number 
+        about the columns in the current table, including name, data type, whether it allows 
+        NULL values, and whether it is part of the primary key. It then executes a 
+        SELECT COUNT(DISTINCT col_name) statement for each column to determine the number 
         of unique values in that column. Finally, it creates a `prettytable.PrettyTable` 
         object to display this information in a readable format.
-        
+
         If one or more column names are passed as arguments, the method also displays the 
         unique values in those columns using a SELECT DISTINCT statement.
         """
-        columns=self.query(f'PRAGMA table_info({self.table})')
-        cols=[col[1] for col in columns]
-        
-        #Make a table of column info
-        table=pt()
-        table.title='Column Information'
-        table.field_names=['colID','name','unique_vals_per_col','type','notnull','dflt_value','primary_key']
+        columns = self.query(f'PRAGMA table_info({self.table})')
+        all_cols = pt()
+        all_cols.title = 'Summary of Columns for Entire DataTable'
+        all_cols.field_names = ['colID', 'name', 'unique_vals_per_col', 'type', 'notnull', 'dflt_value', 'primary_key']
         for c in columns:
-            # c = 'tuple of column info'
-            unique_vals_per_column=self.query(f'SELECT COUNT(DISTINCT {c[1]}) FROM {self.table}')
-            col_info=list(c)
-            # col_info.append(unique_vals_per_column[0][0])
-            col_info.insert(2,unique_vals_per_column[0][0])
-            table.add_row(col_info)
+            unique_vals_per_column = self.query(f'SELECT COUNT(DISTINCT {c[1]}) FROM {self.table}')
+            col_info = list(c)
+            col_info.insert(2, unique_vals_per_column[0][0])
+            all_cols.add_row(col_info)
 
-        if len(incols)>0:
+        if len(incols) > 0:
+            col_tables=[]
             for col in incols:
-                uniques=self.query(f'SELECT DISTINCT {col} FROM {self.table}') #Checks the 'col' in 'table', grabs each distinct values that appears
-                stmt=f'\nValues in {col}:'
+                if self.condition:
+                    uniques = self.query(
+                        f"SELECT DISTINCT {col}, COUNT(*) FROM {self.table} {self.condition} GROUP BY {col}"
+                    )
+                else:
+                    uniques = self.query(
+                        f"SELECT DISTINCT {col}, COUNT(*) FROM {self.table} GROUP BY {col}"
+                    )
+                col_table = pt()
+                col_table.title = f'{col}'
+                col_table.field_names = ['Value', 'Frequency']
                 for u in uniques:
-                    stmt+=f'\n\t{u[0]}'
-                    print(u[0])
-                    if len(u[0])<=1:
-                        print(u[0])
-                    else:
-                        print(u[0])
-                        [print(f'{u[0]}') for i in list(range(len(u[0])))]
-                        # [print(f'{u[0]}') for ]
-                        print(list(range(len(u[0]))))
-                        print(u)
-                        stmt=+[f'{u[0]}' for i in list(range(len(u[0])))]
-                    print(len(u[0]))
-                    print(type(u))
-                    stmt+=f'\t{u[0]}'
-                print(stmt)
+                    col_table.add_row(u)
+                    col_tables.append(col_table)
+            return all_cols, col_tables
+        else:
+            return all_cols
 
-        return cols,table
-    
     def update(self,col_name,old_value,new_value):
         stmt=f"UPDATE {self.table} SET {col_name} = '{new_value}' WHERE {col_name} = '{old_value}'"
         self.cursor.execute(stmt)
         self.conn.commit()
         
+    def table_info(self):
+        #Initialize data table
+        table=pt(header=False, hrules=ALL, vrules=ALL)
 
-    def table_info(self,*cols):
-        #row information
-        stmt=f'SELECT COUNT(*) FROM {self.table}'
+        #Information to grab based on Condtion
+        if self.condition:
+            stmt=f'SELECT COUNT(*) FROM {self.table} {self.condition}'
+            table.title=f'Summary of Dataset - With Conditions'
+        else:
+            stmt=f'SELECT COUNT(*) FROM {self.table}'
+            table.title=f'Summary for \'{self.table}\' Table'
+        
+        #Get Row information
         self.cursor.execute(stmt)
         rows=self.cursor.fetchone() #num_rows = f'Number of rows: {len(rows)}'?
 
         #Display info
-        print(f'DATATABLE INFORMATION')
-
-        table=pt(header=False, hrules=ALL, vrules=ALL)
-        table.add_row(['Table Name',f'{self.table}','Number of samples\n(rows)',rows[0],
-                       'Number of columns',f'{len(self.columns()[0])}'])
+        table.add_row([
+            'Table Name',f'{self.table}','|\n|',
+            'Number of samples\n(rows)',rows[0],'|\n|',
+            'Number of columns',f'{len(self.columns())}'])
         #Show Data table dimensions
         print(table) 
         #Show column details
-        print(self.columns()[1])
+        print(self.col_info())
+    
+    def data_info(self):
+        '''Future update will combine with table_info()'''
+        if self.condition:
+            self.col_info(*self.columns())
+        else:
+            self.table_info()
     
     def insert_row(self, *col_val: tuple):
         #Column portion of the statement
@@ -236,4 +256,66 @@ class DataTable:
         #Turn result into a dictionary with sample ID as the key
         id_dic={tup[0]:tup[1:] for tup in rawres}
         return id_dic
+    
+
+
+    # def columns(self,*incols): #V1x
+    #     """
+    #     Returns information about the columns in the current database table.
+
+    #     Parameters:
+    #         *incols (str): Optional; column names to display unique values for.
+
+    #     Returns:
+    #         cols (list): List of strings representing the column names.
+    #         table (prettytable.PrettyTable): Table object displaying column info.
+
+    #     This method uses the `PRAGMA table_info` SQL statement to retrieve information
+    #     about the columns in the current table, including name, data type, whether it 
+    #     allows NULL values, and whether it is part of the primary key. It then executes 
+    #     a SELECT COUNT(DISTINCT col_name) statement for each column to determine the number 
+    #     of unique values in that column. Finally, it creates a `prettytable.PrettyTable` 
+    #     object to display this information in a readable format.
+
+    #     If one or more column names are passed as arguments, the method also displays the 
+    #     unique values in those columns using a SELECT DISTINCT statement.
+    #     """
+        
+    #     columns=self.query(f'PRAGMA table_info({self.table})')
+    #     cols=[col[1] for col in columns]
+        
+    #     #Make a table of column info
+    #     all_cols=pt() #initialize table
+    #     all_cols.title='Column Information'
+    #     all_cols.field_names=['colID','name','unique_vals_per_col','type','notnull','dflt_value','primary_key']
+    #     for c in columns:
+    #         # c = 'tuple of column info'
+    #         unique_vals_per_column=self.query(f'SELECT COUNT(DISTINCT {c[1]}) FROM {self.table}')
+    #         col_info=list(c)
+    #         # col_info.append(unique_vals_per_column[0][0])
+    #         col_info.insert(2,unique_vals_per_column[0][0])
+    #         all_cols.add_row(col_info)
+
+    #     if len(incols)>0:
+            
+
+    #         #Run through each column 'incol'        
+    #         for col in incols:
+    #             if self.condition: #If conditions has been set:
+    #                 uniques = self.query(
+    #                     f"SELECT DISTINCT {col}, COUNT(*) FROM {self.table} {self.condition} GROUP BY {col}"
+    #                     )
+    #             else:
+    #                 uniques = self.query(
+    #                     f"SELECT DISTINCT {col}, COUNT(*) FROM {self.table} GROUP BY {col}"
+    #                     )
+    #             #Create a new table for each input column
+    #             col_table=pt()
+    #             col_table.title=f'{col}'
+    #             col_table.field_names=['Value', 'Frequency']
+    #             for u in uniques:
+    #                 col_table.add_row(u)
+    #             print(col_table)
+
+    #     return cols, all_cols
         
