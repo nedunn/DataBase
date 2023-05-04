@@ -9,6 +9,15 @@ from prettytable import ALL
 import preprocess
 from collections import Counter
 
+def unique_count(lst):
+    result={}
+    for item in lst:
+        if item in result:
+            result[item] += 1
+        else:
+            result[item]=1
+    return result
+
 class DataTable:
     def __init__(self, db_path,table_name=None):
         #Connect to DB
@@ -27,16 +36,20 @@ class DataTable:
             print(stmt)
         self.table=table_name
         
+        
         self.x='raman_shift' #Database table name where 'x' values are stored
         self.y='original_intensity'
         self.id='id' #Database table column name where spectra specific 'id' valuesare stored
+
 
         #Optional condition for Query searchs
         self.condition=None
 
         #Track sample IDs that are dropped bc they are flagged with outliers
         self.dead_list=[] #IDs of samples
-    
+        self.all_ids=self.get_ids()
+        # self.ids=self.query(f'SELECT {self.id} FROM {self.table}')
+
     def __del__(self):
         '''Automaticallly close the database connection when the object is destroyed (program terminated).'''
         self.conn.close()
@@ -67,6 +80,12 @@ class DataTable:
     # 1)Security: By using parameters, you can protect your code from SQL injection attacks. SQL injection is a common hacking technique where an attacker tries to insert malicious SQL code into a query by exploiting vulnerabilities in the input validation.
     # 2)Performance: Using parameters can improve query performance by allowing the database engine to optimize the execution plan for the query.
     # 3)Reusability: By using parameters, you can reuse the same query with different input values. This can save you time and effort in writing and maintaining multiple similar queries.
+
+    def get_ids(self):
+        ids_badformat=self.query(f'SELECT {self.id} FROM {self.table}')
+        ids=[item[0] for item in ids_badformat]
+        return ids
+
 
     def columns(self):
         '''Returns a list of column names in the current database table.'''
@@ -215,6 +234,57 @@ class DataTable:
 
         #Commit - dont forget to commit
         self.conn.commit()
+        
+    def find_replace(self, find_value, new_value, target_col, find_col=None):
+        if not find_col:
+            find_col=target_col
+        if find_value.lower() == 'null':
+            stmt = f"UPDATE {self.table} SET {target_col} = ? WHERE {find_col} IS NULL"
+            values=(new_value)
+        else:
+            stmt=f'UPDATE {self.table} SET {target_col} = ? WHERE {find_col} = ?'
+            values=(new_value, find_value)
+        
+        try:
+            # Retrieve list of INITIAL values in the target_col column
+            before_update = [row[0] for row in self.cursor.execute(f'SELECT {target_col} FROM {self.table}')] 
+            before_update=unique_count(before_update)
+
+            #Execute the update
+            self.cursor.execute(stmt,values)
+            print(f'{self.cursor.rowcount} rows updated.')
+            self.conn.commit()
+            
+            #Get list of UPDATED values
+            after_update = [row[0] for row in self.cursor.execute(f'SELECT {target_col} FROM {self.table}')]
+            after_update=unique_count(after_update)
+        
+            print(f'before: {before_update}\nafter: {after_update}')
+
+            self.conn.rollback()
+            self.conn.commit()
+
+        except:
+            print('AHHHH ERROR')
+ 
+
+
+
+
+        # try:
+        #     self.cursor.execute(stmt,values)
+        #     print(f'{self.cursor.rowcount} rows updated.')
+
+        # self.cursor.execute(stmt, values)
+        # self.conn.commit()
+
+        # # Retrieve the list of values in the target_col column before the update
+        # before_update = [row[0] for row in self.cursor.execute(f'SELECT {target_col} FROM {self.table}')]
+        # self.cursor.execute(stmt, values)
+        # self.conn.commit()
+        # # Retrieve the list of values in the target_col column after the update
+        # after_update = [row[0] for row in self.cursor.execute(f'SELECT {target_col} FROM {self.table}')]
+
 
     def data_from_db(self, x_loc=2, y_loc=3):
         """
@@ -243,8 +313,32 @@ class DataTable:
         # t=byte_data.decode('utf-8')
         t=np.frombuffer(byte_data,dtype=np.int64)
         return t
-    
-    def raman_shifts(self, len_range=[600,700]):
+
+    def match_index(self,df):
+        unique_rows=df.drop_duplicates()
+        unique_rows.reset_index(inplace=True, drop=True)
+        for row in unique_rows.iterrows():
+            match_idx=df.index[df.apply(lambda x: x.equals(row[1]), axis=1)].tolist()
+            print(f'row {row[0]}\nmatchindex {len(match_idx)}\n')
+        return unique_rows
+
+    # def match_index(self, df, selected_row=None):
+    #     if selected_row is not None:
+    #         unique_rows = df[df.iloc[:, 0] == selected_row]
+    #         print('got here')
+    #     else:
+    #         unique_rows = df.drop_duplicates()
+            
+    #     unique_rows.reset_index(inplace=True, drop=True)
+        
+    #     for row in unique_rows.iterrows():
+    #         match_idx = df.index[df.apply(lambda x: x.equals(row[1]), axis=1)].tolist()
+    #         print(f'row {row[0]}\nmatchindex {len(match_idx)}\n')
+            
+    #     return unique_rows
+
+        
+    def raman_shifts(self, len_range=[600,700], **kwargs):
         '''
         Retrieve Raman shift data from the database and perform outlier detection.
 
@@ -283,13 +377,15 @@ class DataTable:
         dropped_id=[]
         table=pt(title='Samples Removed: length outside of expected range')
         table.field_names=['Sample ID','Length']
+        
+        
         for tup in all_tup_list:
             if len(tup[1]) >= len_range[0] and len(tup[1]) <= len_range[1]:
                 tup_list.append(tup)
             else: #EDIT NEEDED also remove these tup[0]'s from the intensity dataset
                 table.add_row([tup[0],len(tup[1])])
                 dropped_id.append(tup[0])
-        print(table)
+        # print(table) **EDIT dont print if empty
 
         #Convert tuples list to dictionary
         data_dict={t[0]:t[1] for t in tup_list} #(id,[xs values])
@@ -300,6 +396,34 @@ class DataTable:
         #Change a value for testing purposes
         # df.iloc[0,0]=1000 #Change a value for testing purposes
         
+        #Find each 'x' type
+        unique_x_sets=set(map(tuple, df.values))
+        #ALT code = unique_cols = df.T.drop_duplicates()
+        print(f'There are {len(unique_x_sets)} found in the dataset.')
+        xlist=list(unique_x_sets)
+        if len(unique_x_sets) > 1:
+
+            pass
+        table=pt(title='Xs Detected')
+        table.field_names=['index', 'length', 'head', 'tail']
+
+        for x in xlist:
+            ind=xlist.index(x)
+            table.add_row([ind,len(x), x[:3],x[-3:]])
+            mask = np.all(df==x, axis=1) #checks each row (sample) for whether or not the 'x' matches the row's x
+            match_idx=np.where(mask)[0].tolist()
+        
+        #Alternative
+        # self.match_index(df, **kwargs)
+        #**NEXT select which x to use, drop all 'ys' that are not supported
+
+
+        # unique_df=df.drop_duplicates()
+        # for i in range(0,len(unique_df)):
+        #     anx=np.array(unique_df.iloc[i,:])
+        #     # if np.array_equal()
+
+
         #Calc per Column (Raman Shift)
         mean=df.mean() #Series of means per Raman Shift
         
@@ -332,6 +456,9 @@ class DataTable:
 
         #Add sample ids that have been id'ed to drop to the 'dead list'
         for sample in dropped_id:
+            if sample not in self.dead_list:
+                self.dead_list.append(sample)
+        for sample in ids_with_outlier:
             if sample not in self.dead_list:
                 self.dead_list.append(sample)
 
@@ -388,5 +515,97 @@ class DataTable:
         else:
             rawres=rawres=self.query(f'SELECT {self.id}, {names} FROM {self.table}')
         #Turn result into a dictionary with sample ID as the key
-        id_dic={tup[0]:tup[1:] for tup in rawres}
+        res=[tup for tup in rawres if tup[0] not in self.dead_list]
+        id_dic={tup[0]:tup[1:] for tup in res}
         return id_dic
+    
+    def average_lists(self,*lists):
+        '''Example:
+        l1  =  [3,4,3]
+        l2  =  [3,5,2]
+        l3  =  [3,6,1]
+        result=[3,5,2]
+        '''
+        stack=np.vstack(lists)
+        return np.mean(stack,axis=0)
+    
+    def get_spectra(self, *spec_ids):
+        """
+        Returns a list of tuples containing the spectral data for each specified ID.
+
+        Args:
+            *spec_ids: Variable-length argument list of integer IDs or tuples of integer IDs to be
+            averaged. If a tuple of IDs is provided, the spectra for each ID will be averaged and
+            the resulting tuple will be included in the returned list.
+
+        Returns:
+            A list of tuples, where each tuple contains the ID (or tuple of IDs), x-values, and y-values
+            for the specified spectra.
+
+        Example:
+            To get the spectral data for IDs 1, 2, and (3, 4) and average the data for IDs 3 and 4:
+            >>> data = obj.get_spectra(1, 2, (3, 4))
+            >>> print(data)
+            [
+                (1, [1.0, 2.0, 3.0], [4.0, 5.0, 6.0]),
+                (2, [1.0, 2.0, 3.0], [8.0, 7.0, 6.0]),
+                ('3, 4', [2.0, 3.0, 5.0], [2.0, 1.5, 3.5])
+            ]
+        """
+
+        #*EDIT* check that id is valid *update: will be easier to impliment now that we have 'all_ids' argument
+        # ids=', '.join(str(id) for id in spec_ids)
+        # stmt=f'SELECT {self.id}, {self.x}, {self.y} FROM {self.table} WHERE id IN ({ids})'
+        # rawres=self.query(stmt)
+        data=[]
+
+        #If no IDs given, return all data that is not excluded bc of condition
+        if not spec_ids:
+            ids_to_grab=[id for id in self.all_ids if id not in self.dead_list]
+            for id in ids_to_grab:
+                stmt=f'SELECT {self.id}, {self.x}, {self.y} FROM {self.table} WHERE id == {id}'
+                rawres=self.query(stmt)
+                single_spec_tup=(rawres[0][0], self.blob2list(rawres[0][1]), self.blob2list(rawres[0][2]))
+                data.append(single_spec_tup)
+
+        #If specific IDs given:
+        if spec_ids: #**EDIT DONT FORGET TO TEST, SINCE FUNCTION HAS BEEN EDITIED
+            for item in spec_ids:            
+                if isinstance(item,tuple): #ids placed within a tuple will be averaged
+                    ind=spec_ids.index(item)
+                    single_spec_tup=self.ave_spectra(item)
+                    data.append(single_spec_tup)
+                elif isinstance(item,int):
+                    stmt=f'SELECT {self.id}, {self.x}, {self.y} FROM {self.table} WHERE id == {item}'
+                    rawres=self.query(stmt)
+                    single_spec_tup=(rawres[0][0], self.blob2list(rawres[0][1]), self.blob2list(rawres[0][2]))
+                    data.append(single_spec_tup)
+                elif isinstance(item,list):
+                    for i in item:
+                        stmt=f'SELECT {self.id}, {self.x}, {self.y} FROM {self.table} WHERE id == {i}'
+                        rawres=self.query(stmt)
+                        single_spec_tup=(rawres[0][0], self.blob2list(rawres[0][1]), self.blob2list(rawres[0][2]))
+                        data.append(single_spec_tup)
+        return data
+                
+    def ave_spectra(self,ids):
+        """
+        Given a tuple of `ids`, returns a tuple of averaged x and y spectra.
+
+        Parameters:
+        ids (tuple): A tuple of `id` values to be averaged.
+
+        Returns:
+        tuple: A tuple of the format `(name, x, y)`, where `name` is a string representation
+        of the `ids` tuple, `x` is the averaged x spectrum, and `y` is the averaged y spectrum.
+        """
+        if isinstance(ids,tuple):
+            stmt=f'SELECT {self.id}, {self.x}, {self.y} FROM {self.table} WHERE id IN {ids}'
+            rawres=self.query(stmt)
+            res=[(tup[0], self.blob2list(tup[1]), self.blob2list(tup[2])) for tup in rawres]
+            x=self.average_lists([tup[1] for tup in res])
+            y=self.average_lists([tup[2] for tup in res])
+            name = str(ids)[1:-1] #Convert to string and drop the '()'
+            return (name,x,y)
+        else:
+            print('Error: \'ids\' argument must be a tuple.')
