@@ -69,23 +69,22 @@ class DataTable:
             self.cursor.execute(stmt)
         if fetch:
             return self.cursor.fetchall()
-    # ###EXAMPLE USEAGE###
-    # db = Database('mydatabase.db')
-    # stmt = "SELECT name, age FROM users WHERE gender=? AND occupation=?"
-    # params = ('male', 'engineer')
-    # results = db.query(stmt, params=params)
-    # for row in results:
-    #     print(row['name'], row['age'])
-    # #Why use?
-    # 1)Security: By using parameters, you can protect your code from SQL injection attacks. SQL injection is a common hacking technique where an attacker tries to insert malicious SQL code into a query by exploiting vulnerabilities in the input validation.
-    # 2)Performance: Using parameters can improve query performance by allowing the database engine to optimize the execution plan for the query.
-    # 3)Reusability: By using parameters, you can reuse the same query with different input values. This can save you time and effort in writing and maintaining multiple similar queries.
+    '''###EXAMPLE USEAGE###
+    db = Database('mydatabase.db')
+    stmt = "SELECT name, age FROM users WHERE gender=? AND occupation=?"
+    params = ('male', 'engineer')
+    results = db.query(stmt, params=params)
+    for row in results:
+        print(row['name'], row['age'])
+    #Why use?
+    1)Security: By using parameters, you can protect your code from SQL injection attacks. SQL injection is a common hacking technique where an attacker tries to insert malicious SQL code into a query by exploiting vulnerabilities in the input validation.
+    2)Performance: Using parameters can improve query performance by allowing the database engine to optimize the execution plan for the query.
+    3)Reusability: By using parameters, you can reuse the same query with different input values. This can save you time and effort in writing and maintaining multiple similar queries.'''
 
     def get_ids(self):
         ids_badformat=self.query(f'SELECT {self.id} FROM {self.table}')
         ids=[item[0] for item in ids_badformat]
         return ids
-
 
     def columns(self):
         '''Returns a list of column names in the current database table.'''
@@ -310,9 +309,17 @@ class DataTable:
     
     def blob2list(self,byte_data):
         '''Pass blob/byte data to np.array'''
-        # t=byte_data.decode('utf-8')
-        t=np.frombuffer(byte_data,dtype=np.int64)
-        return t
+        try: # byte data look like: b'{"0":282,"1":283,"2":285,"3":2... (dop specific)
+            asstr=byte_data.decode('utf-8')
+            dic=json.loads(asstr)
+            clean=np.array(list(dic.values()))
+            # print('decoding for do_pac')
+        
+        except: #byte data look like: b'\xf0\x01\x00\x00\
+            clean=np.frombuffer(byte_data,dtype=np.int64)
+            print('prob dopac')
+        
+        return clean
 
     def match_index(self,df):
         unique_rows=df.drop_duplicates()
@@ -335,10 +342,10 @@ class DataTable:
     #         match_idx = df.index[df.apply(lambda x: x.equals(row[1]), axis=1)].tolist()
     #         print(f'row {row[0]}\nmatchindex {len(match_idx)}\n')
             
-    #     return unique_rows
+    #     return unique_rows 
 
-        
-    def raman_shifts(self, len_range=[600,700], **kwargs):
+    
+    def raman_shifts(self,  **kwargs):
         '''
         Retrieve Raman shift data from the database and perform outlier detection.
 
@@ -371,20 +378,42 @@ class DataTable:
 
         #Convert byte data in raw tuples to list data
         all_tup_list=[(tup[0],self.blob2list(tup[1])) for tup in res]
-        tup_list=[]
         #Data outside of the set range will be flagged to be dropped *self.dead_list*
         #Filter by length -> helps to prevent mismatched data from being compared
-        dropped_id=[]
         table=pt(title='Samples Removed: length outside of expected range')
         table.field_names=['Sample ID','Length']
-        
-        
-        for tup in all_tup_list:
-            if len(tup[1]) >= len_range[0] and len(tup[1]) <= len_range[1]:
-                tup_list.append(tup)
-            else: #EDIT NEEDED also remove these tup[0]'s from the intensity dataset
+
+        #Find average length x input per sample
+        #May combine with "Find each x type" section of function later. I am busy ATM
+        lengths=([len(tup[1]) for tup in all_tup_list])
+        unique_lengths=(unique_count(lengths))
+        dropped_id=[]
+        if len(unique_lengths) > 1:
+            tup_list=[]
+            length_to_use=max(unique_lengths, key=unique_lengths.get) # get most common length
+            for tup in all_tup_list: 
+                if len(tup[1])==length_to_use: #keep this data
+                    tup_list.append(tup)
+                else: #remove this data
+                    table.add_row([tup[0],len(tup[1])])
+                    
+            for tup in all_tup_list:
                 table.add_row([tup[0],len(tup[1])])
                 dropped_id.append(tup[0])
+                dropped_id.append(tup[0])
+        else: #all of the x lists are the same length!
+            tup_list=all_tup_list
+        
+        ##Should be able to delete this section by the time i forget about it
+        # tup_list=[]   
+        # for tup in all_tup_list:
+        #     if len(tup[1]) >= len_range[0] and len(tup[1]) <= len_range[1]:
+        #         print('if')
+        #         tup_list.append(tup)
+        #     else: #EDIT NEEDED also remove these tup[0]'s from the intensity dataset
+        #         print('else')
+        #         table.add_row([tup[0],len(tup[1])])
+                
         # print(table) **EDIT dont print if empty
 
         #Convert tuples list to dictionary
@@ -398,11 +427,11 @@ class DataTable:
         
         #Find each 'x' type
         unique_x_sets=set(map(tuple, df.values))
+        print(unique_x_sets )
         #ALT code = unique_cols = df.T.drop_duplicates()
         print(f'There are {len(unique_x_sets)} found in the dataset.')
         xlist=list(unique_x_sets)
         if len(unique_x_sets) > 1:
-
             pass
         table=pt(title='Xs Detected')
         table.field_names=['index', 'length', 'head', 'tail']
@@ -481,13 +510,28 @@ class DataTable:
             rawres=self.query(f'SELECT {self.id}, {self.y} FROM {self.table}')
         #Filter rawres by removing any samples whos ID has been added to dead_list
         res=[tup for tup in rawres if tup[0] not in self.dead_list]
+        
         #Convert byte data to list data, then DF
-        tup_list=[(tup[0],self.blob2list(tup[1])) for tup in res]
+        tup_list=[(tup[0],self.blob2list(tup[1])) for tup in rawres]
+
+        # # test=[len(tup[1]) for tup in tup_list]
+        # # print(list(set(test)))
         prepro_list=[(tup[0], preprocess.process(tup[1])) for tup in tup_list]        #Preprocess the data
         data_dict={t[0]:t[1] for t in prepro_list}
         df=pd.DataFrame.from_dict(data_dict,orient='index')
         #DF with rows = sample id, columns = raman shift index
         return df
+    
+    def apply_snv(self,df): #where each sample is a ROW
+        row_means=df.mean(axis=1) #Calculate the mean for each row
+        df_centered=df.sub(row_means, axis=0) #Subtract the row mean from each rs in the row
+        row_std=np.sqrt(df_centered.pow(2).sum(axis=1))/(df.shape[1]-1) #Calculate teh STD per row
+        result=df_centered.div(row_std,axis=0) #Divide each element in the row by the row standard deviation
+        return result
+    
+    def apply_snv(self,df):
+        res=np.zeros_like(df)
+        
     
     def names(self, name_cols=['filename','frame']):
         """
