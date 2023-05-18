@@ -1,4 +1,4 @@
-#Datatable linker CSV->DB DB->DF
+#Database linker CSV->DB DB->DF
 import sqlite3
 import os
 import pandas as pd
@@ -18,30 +18,6 @@ def unique_count(lst):
             result[item]=1
     return result
 
-def map_index(df,namedic): 
-    '''Replaces the index of a DataFrame with corresponding values from a dictionary.
-
-    Args:
-        df (pandas.DataFrame): The DataFrame for which the index is to be replaced.
-        namedic (dict): A dictionary containing the mapping of index values to new names.
-
-    Returns:
-        pandas.DataFrame: A copy of the input DataFrame with the index replaced by the corresponding
-        values from the dictionary.
-
-    Example:
-        >>> df = pd.DataFrame({'Col1': [1, 2, 3]}, index=[2, 3, 1])
-        >>> namedic = {1: 'A', 2: 'B', 3: 'C'}
-        >>> result = index_from_dic(df, namedic)
-        >>> print(result)
-           Col1
-        A     1
-        B     2
-        C     3'''
-    res=df.copy(deep=True)
-    res.index=res.index.map(namedic.get)
-    return res
-
 class DataTable:
     def __init__(self, db_path,table_name=None):
         #Connect to DB
@@ -59,14 +35,13 @@ class DataTable:
                 stmt+=f'\n\t{table[0]}'
             print(stmt)
         self.table=table_name
-
-        self.name_cols=['filename','frame']
-        self.name_join=', '
+        
         
         self.x='raman_shift' #Database table name where 'x' values are stored
         self.y='original_intensity'
         self.id='id' #Database table column name where spectra specific 'id' valuesare stored
- 
+
+
         #Optional condition for Query searchs
         self.condition=None
 
@@ -79,6 +54,14 @@ class DataTable:
         '''Automaticallly close the database connection when the object is destroyed (program terminated).'''
         self.conn.close()
             
+    # def query(self,stmt,fetch=True):
+    #     #Original
+    #     if fetch==True:
+    #         res = self.cursor.execute(f'{stmt}')
+    #         return self.cursor.fetchall()
+    #     else:
+    #         res = self.cursor.execute(f'{stmt}')
+    #         return None
     def query(self, stmt, params=None, fetch=True):
         if params is not None:
             self.cursor.execute(stmt, params)
@@ -167,6 +150,12 @@ class DataTable:
             # print(f"Error: thethe following columns are valid: {', '.join(missing_cols)}")
         return col_tables
 
+    def update(self,col_name,old_value,new_value):
+        #Original
+        stmt=f"UPDATE {self.table} SET {col_name} = '{new_value}' WHERE {col_name} = '{old_value}'"
+        self.cursor.execute(stmt) 
+        self.conn.commit()
+
     def update(self, col_name, old_value, new_value):
         #Try this method with parameterized queries 
         stmt = f"UPDATE ? SET ? = ? WHERE ? = ?"
@@ -226,9 +215,6 @@ class DataTable:
         Raises:
             sqlite3.Error: If there is an error executing the INSERT statement.
         """
-        #Make sure user wants to update the data table
-        input('Press ENTER to continue...')
-
         #Column portion of the statement
         collist=[cv[0] for cv in col_val]
         colstr=(', ').join(collist)
@@ -278,8 +264,49 @@ class DataTable:
             self.conn.commit()
 
         except:
-            print('AHHHH ERROR at find_replace in data_wrangle')
+            print('AHHHH ERROR')
+ 
 
+
+
+
+        # try:
+        #     self.cursor.execute(stmt,values)
+        #     print(f'{self.cursor.rowcount} rows updated.')
+
+        # self.cursor.execute(stmt, values)
+        # self.conn.commit()
+
+        # # Retrieve the list of values in the target_col column before the update
+        # before_update = [row[0] for row in self.cursor.execute(f'SELECT {target_col} FROM {self.table}')]
+        # self.cursor.execute(stmt, values)
+        # self.conn.commit()
+        # # Retrieve the list of values in the target_col column after the update
+        # after_update = [row[0] for row in self.cursor.execute(f'SELECT {target_col} FROM {self.table}')]
+
+
+    def data_from_db(self, x_loc=2, y_loc=3):
+        """
+        Retrieve data from the database table associated with this `database` instance.
+        
+        Arguments:
+        - x_loc (int): The index of the column containing the X data in the table. Defaults to 2.
+        - y_loc (int): The index of the column containing the Y data in the table. Defaults to 3.
+        
+        Returns:
+        - x (list): A list of floats representing the X values from all rows in the table.
+        - y (list): A list of floats representing the Y values from all rows in the table.
+        
+        """
+        self.cursor.execute(f'SELECT * FROM {self.table}')
+        res=self.cursor.fetchall()
+        
+        for item in res:
+            xdic=json.loads(item[x_loc].decode('utf-8'))
+            ydic=json.loads(item[y_loc].decode('utf-8'))
+            x=[float(val) for key,val in xdic.items()]
+            y=[float(val) for key,val in ydic.items()]
+    
     def blob2list(self,byte_data):
         '''Pass blob/byte data to np.array'''
         try: # byte data look like: b'{"0":282,"1":283,"2":285,"3":2... (dop specific)
@@ -290,8 +317,33 @@ class DataTable:
         
         except: #byte data look like: b'\xf0\x01\x00\x00\
             clean=np.frombuffer(byte_data,dtype=np.int64)
+            print('prob dopac')
         
         return clean
+
+    def match_index(self,df):
+        unique_rows=df.drop_duplicates()
+        unique_rows.reset_index(inplace=True, drop=True)
+        for row in unique_rows.iterrows():
+            match_idx=df.index[df.apply(lambda x: x.equals(row[1]), axis=1)].tolist()
+            print(f'row {row[0]}\nmatchindex {len(match_idx)}\n')
+        return unique_rows
+
+    # def match_index(self, df, selected_row=None):
+    #     if selected_row is not None:
+    #         unique_rows = df[df.iloc[:, 0] == selected_row]
+    #         print('got here')
+    #     else:
+    #         unique_rows = df.drop_duplicates()
+            
+    #     unique_rows.reset_index(inplace=True, drop=True)
+        
+    #     for row in unique_rows.iterrows():
+    #         match_idx = df.index[df.apply(lambda x: x.equals(row[1]), axis=1)].tolist()
+    #         print(f'row {row[0]}\nmatchindex {len(match_idx)}\n')
+            
+    #     return unique_rows 
+
     
     def raman_shifts(self,  **kwargs):
         '''
@@ -351,6 +403,18 @@ class DataTable:
                 dropped_id.append(tup[0])
         else: #all of the x lists are the same length!
             tup_list=all_tup_list
+        
+        ##Should be able to delete this section by the time i forget about it
+        # tup_list=[]   
+        # for tup in all_tup_list:
+        #     if len(tup[1]) >= len_range[0] and len(tup[1]) <= len_range[1]:
+        #         print('if')
+        #         tup_list.append(tup)
+        #     else: #EDIT NEEDED also remove these tup[0]'s from the intensity dataset
+        #         print('else')
+        #         table.add_row([tup[0],len(tup[1])])
+                
+        # print(table) **EDIT dont print if empty
 
         #Convert tuples list to dictionary
         data_dict={t[0]:t[1] for t in tup_list} #(id,[xs values])
@@ -358,6 +422,7 @@ class DataTable:
         ###Compare xs, look for outliers
         #Create a DF from the dictionary
         df=pd.DataFrame.from_dict(data_dict,orient='index') #Columns = rs index, index=sampleID (int)
+        #Change a value for testing purposes
         # df.iloc[0,0]=1000 #Change a value for testing purposes
         
         #Find each 'x' type
@@ -376,6 +441,17 @@ class DataTable:
             table.add_row([ind,len(x), x[:3],x[-3:]])
             mask = np.all(df==x, axis=1) #checks each row (sample) for whether or not the 'x' matches the row's x
             match_idx=np.where(mask)[0].tolist()
+        
+        #Alternative
+        # self.match_index(df, **kwargs)
+        #**NEXT select which x to use, drop all 'ys' that are not supported
+
+
+        # unique_df=df.drop_duplicates()
+        # for i in range(0,len(unique_df)):
+        #     anx=np.array(unique_df.iloc[i,:])
+        #     # if np.array_equal()
+
 
         #Calc per Column (Raman Shift)
         mean=df.mean() #Series of means per Raman Shift
@@ -456,7 +532,8 @@ class DataTable:
     def apply_snv(self,df):
         res=np.zeros_like(df)
         
-    def name_dic(self,val_as_tup=False): #original func(names)
+    
+    def names(self, name_cols=['filename','frame']):
         """
         Returns a dictionary of sample names (or any other specified metadata)
         for each sample ID in the database table.
@@ -475,12 +552,7 @@ class DataTable:
         db.names()  # Returns a dictionary of all sample names/metadata for all samples in the database
         db.names(name_cols=['filename'])  # Returns a dictionary of filenames for all samples in the database
         """
-        #Format col names depending on if more than 1 column is entered
-        # if len(self.name_cols)>1:
-        names=(', ').join(self.name_cols)
-        # else:
-            # names=self.name_cols
-        
+        names=(', ').join(name_cols)
         #Get data
         if self.condition:
             rawres=self.query(f'SELECT {self.id}, {names} FROM {self.table} {self.condition}')
@@ -488,33 +560,9 @@ class DataTable:
             rawres=rawres=self.query(f'SELECT {self.id}, {names} FROM {self.table}')
         #Turn result into a dictionary with sample ID as the key
         res=[tup for tup in rawres if tup[0] not in self.dead_list]
-        if val_as_tup==False:
-            id_dic={tup[0]:self.name_join.join(str(val) for val in tup[1:]) for tup in res}
-        else:
-            id_dic={tup[0]:tup[1:] for tup in res}
+        id_dic={tup[0]:tup[1:] for tup in res}
         return id_dic
     
-
-    def names(self,id_list): #look at the mapnames function
-        '''Retrieves names corresponding to the index values of a DataFrame.
-
-        Args:
-            df (pandas.DataFrame): The DataFrame whose index values are used to retrieve the names.
-
-        Returns:
-            list: A list of names corresponding to the index values of the DataFrame.
-
-        Example:
-            >>> df = pd.DataFrame({'Col1': [1, 2, 3]}, index=['A', 'B', 'C'])
-            >>> obj = YourClassName()
-            >>> result = obj.names(df)
-            >>> print(result)
-            ['NameA', 'NameB', 'NameC']'''
-        id_list=list(id_list)
-        name_list=[self.name_dic()[id] for id in id_list]
-        return name_list
-
-        
     def average_lists(self,*lists):
         '''Example:
         l1  =  [3,4,3]
@@ -550,6 +598,9 @@ class DataTable:
         """
 
         #*EDIT* check that id is valid *update: will be easier to impliment now that we have 'all_ids' argument
+        # ids=', '.join(str(id) for id in spec_ids)
+        # stmt=f'SELECT {self.id}, {self.x}, {self.y} FROM {self.table} WHERE id IN ({ids})'
+        # rawres=self.query(stmt)
         data=[]
 
         #If no IDs given, return all data that is not excluded bc of condition
