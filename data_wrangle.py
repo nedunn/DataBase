@@ -456,7 +456,7 @@ class DataTable:
     def apply_snv(self,df):
         res=np.zeros_like(df)
         
-    def name_dic(self,val_as_tup=False): #original func(names)
+    def name_dic(self,cols=[], val_as_tup=False): #original func(names)
         """
         Returns a dictionary of sample names (or any other specified metadata)
         for each sample ID in the database table.
@@ -477,11 +477,16 @@ class DataTable:
         """
         #Format col names depending on if more than 1 column is entered
         # if len(self.name_cols)>1:
-        names=(', ').join(self.name_cols)
-        # else:
-            # names=self.name_cols
+        if len(cols)==0:
+            cols=self.name_cols
+            print('if')
+        if type(cols)!=list:
+            print('\'cols\' input must be a list.')
+            cols=self.name_cols
+        names=(', ').join(cols)
+        print(names)
         
-        #Get data
+        #Get data 
         if self.condition:
             rawres=self.query(f'SELECT {self.id}, {names} FROM {self.table} {self.condition}')
         else:

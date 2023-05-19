@@ -17,34 +17,48 @@ import pybaselines.spline as py
 
 
 class multivar:
+    '''Input dataframe is expected to have Raman shift as columns and rows are samples.
+    The index values for each row should be the sampleID.
+    Dictionaries can be used to set the labels for hovertext, color, and symbol.''' 
     def __init__(self,intens,rs,
-                 names, 
+                 namedic,
+                 symbol=None,
+                #  names, 
                  color_dict = None,
                  color_by=None,
-                 hover=None,symbol=None,
+                 hover=None,
                  ncomp=10):
-        self.intens=intens #df
+        
+        self.sampid=intens.index.to_list()
+        
+        self.intens=intens.T #df
         self.rs=rs #series
         self.ncomp=ncomp
-    
-        self.names=list(names)
 
-        # self.color_dict=color_dict,
-        if color_by==None:
-            self.color=self.names
-        else:
-            self.color=list(color_by)
-        if hover==None:
-            self.hover=self.names
-        else:
-            self.hover=hover
-        if symbol==None:
-            self.symbol=self.names
-        else:
-            self.symbol=symbol
+        self.name_dic=namedic
+        self.symbol_dic=symbol
+        self.hover_dic=hover
+
+        # self.names, self.hover, self.color = self.sampid, self.sampid, self.sampid
+        # self.color=names #remove
+        # self.symbol=names #remove
+
+        # self.names=list(names)
+
+        # # self.color_dict=color_dict,
+        # if color_by==None:
+        #     self.color=self.names
+        # else:
+        #     self.color=list(color_by)
+        # if hover==None:
+        #     self.hover=self.names
+        # else:
+        #     self.hover=hover
+        # if symbol==None:
+        #     self.symbol=self.names
+        # else:
+            # self.symbol=symbol
         
-
-
         self.rs_ax='Raman Shift (cm-1)'
 
     def label_gen(self,prefix,n):
@@ -71,8 +85,8 @@ class multivar:
         #Get components
         pc_labels=self.label_gen('PC',self.ncomp)
         pcs=pca.components_.T*np.sqrt(pca.explained_variance_)
-        pcs=pd.DataFrame(pcs,columns=pc_labels, index=self.names)
-
+        pcs=pd.DataFrame(pcs,columns=pc_labels, index=self.sampid)
+    
         #Get explained variance
         explained_list=[round(x*100,2) for x in pca.explained_variance_ratio_]
         explained={pc_labels[i]:explained_list[i] for i in range(self.ncomp)}
@@ -141,17 +155,38 @@ class multivar:
         return figs
             
     def pca_3d(self, x='PC 3', y='PC 2', z='PC 1'):
+        if self.name_dic==None:
+            print('default 3d pca labels')
+            #Need to add default code here later so namedic is not required.
+        else:
+            print('dictionary for color labels exists')
+        
         pcs,loadings,explained=self.pca_run()
         
-        fig=px.scatter_3d(pcs,x=x,y=y,z=z, color=self.color,
+        #Get list for how to color datapoints on plot   
+        namelist=[self.name_dic.get(idx,idx) for idx in pcs.index]
+        if self.symbol_dic is None:
+            symlist=None
+        else:
+            symlist=[self.symbol_dic.get(idx,idx) for idx in pcs.index]
+        if self.hover_dic is None:
+            hoverlist=namelist
+        else:
+            hoverlist=[self.hover_dic.get(idx,idx) for idx in pcs.index]
+
+        input('Press ENTER to continue...')
+
+        fig=px.scatter_3d(pcs,x=x,y=y,z=z, color=namelist,
+                          symbol=symlist,
+                          hover_name=hoverlist
                         # color_discrete_map=self.color_dict,
-                        symbol=self.symbol,
+                        # symbol=self.symbol,
+                        # hover_name=self.hover,
                         # symbol_sequence=self.symbol_gen(len(color)),
                         # color_continuous_scale=px.colors.sequential.Jet, range_color=(0,-20),  #Jet,
-                        hover_name=self.hover
                         )
-        fig.update_layout(height=800)#, showlegend=False)#, template='simple_white')
-        fig.update_traces()
+
+        # fig.update_layout(height=800)#, showlegend=False)#, template='simple_white')
 
         fig.update_layout(scene=dict(
             xaxis_title=f'{x} ({explained[x]}%)',
