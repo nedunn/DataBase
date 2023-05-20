@@ -86,17 +86,17 @@ class DataTable:
             self.cursor.execute(stmt)
         if fetch:
             return self.cursor.fetchall()
-    '''###EXAMPLE USEAGE###
-    db = Database('mydatabase.db')
-    stmt = "SELECT name, age FROM users WHERE gender=? AND occupation=?"
-    params = ('male', 'engineer')
-    results = db.query(stmt, params=params)
-    for row in results:
-        print(row['name'], row['age'])
-    #Why use?
-    1)Security: By using parameters, you can protect your code from SQL injection attacks. SQL injection is a common hacking technique where an attacker tries to insert malicious SQL code into a query by exploiting vulnerabilities in the input validation.
-    2)Performance: Using parameters can improve query performance by allowing the database engine to optimize the execution plan for the query.
-    3)Reusability: By using parameters, you can reuse the same query with different input values. This can save you time and effort in writing and maintaining multiple similar queries.'''
+        '''###EXAMPLE USEAGE###
+        db = Database('mydatabase.db')
+        stmt = "SELECT name, age FROM users WHERE gender=? AND occupation=?"
+        params = ('male', 'engineer')
+        results = db.query(stmt, params=params)
+        for row in results:
+            print(row['name'], row['age'])
+        #Why use?
+        1)Security: By using parameters, you can protect your code from SQL injection attacks. SQL injection is a common hacking technique where an attacker tries to insert malicious SQL code into a query by exploiting vulnerabilities in the input validation.
+        2)Performance: Using parameters can improve query performance by allowing the database engine to optimize the execution plan for the query.
+        3)Reusability: By using parameters, you can reuse the same query with different input values. This can save you time and effort in writing and maintaining multiple similar queries.'''
 
     def get_ids(self):
         ids_badformat=self.query(f'SELECT {self.id} FROM {self.table}')
@@ -179,28 +179,25 @@ class DataTable:
         Generates a summary of the specified table, including number of rows and columns,
         and details on each column such as column ID, name, unique values, data type, 
         and whether the column is nullable or has a default value.
-
+        
         Returns:
         None
         '''
-        #Initialize data table
-        table=pt(header=False, hrules=ALL, vrules=ALL)
-
         stmt=f'SELECT COUNT(*) FROM {self.table}'
-        table.title=f'Summary for \'{self.table}\' Table'
+        title=('-' * (len(stmt)+4))
+        title+=f'\n| Summary for \'{self.table}\' Table |\n'
+        title+=('-' * (len(stmt)+4))
+        print(title)
         
-        #Get Row information
+        # #Get Row information
         self.cursor.execute(stmt)
         rows=self.cursor.fetchone() #num_rows = f'Number of rows: {len(rows)}'?
-
-        #Display info
-        table.add_row([
-            'Table Name',f'{self.table}','|\n|',
-            'Number of samples\n(rows)',rows[0],'|\n|',
-            'Number of columns',f'{len(self.columns())}'])
-        #Show Data table dimensions
-        print(table) 
         
+        print(f'Number of samples (rows): {rows[0]}')
+        print(f'Number of columns in table: {len(self.columns())}')
+
+        ########################
+
         #Show column details
         columns = self.query(f'PRAGMA table_info({self.table})')
         all_cols = pt()
@@ -293,6 +290,18 @@ class DataTable:
         
         return clean
     
+    def grab_raw_data(self,cols=None):
+        # SELECT CONCAT(column1, column2) AS combined_values
+        # FROM your_table
+        # WHERE CONCAT(column1, column2) NOT IN ('10', '01');
+        # if len(cols) > ... use concat?                                                                                                                                                                                                                                                                                                                                                                        
+
+        if self.condition:
+            rawres=self.query(f'SELECT {self.id}, {cols} FROM {self.table} {self.condition}')
+        else:
+            rawres=self.query(f'SELECT {self.id}, {cols} FROM {self.table}') 
+        return rawres
+    
     def raman_shifts(self,  **kwargs):
         '''
         Retrieve Raman shift data from the database and perform outlier detection.
@@ -316,10 +325,7 @@ class DataTable:
 
         '''
         #Grab data from DB
-        if self.condition:
-            rawres=self.query(f'SELECT {self.id}, {self.x} FROM {self.table} {self.condition}')
-        else:
-            rawres=self.query(f'SELECT {self.id}, {self.x} FROM {self.table}')
+        rawres=self.grab_raw_data(cols=self.x)
        
         #Filter rawres by removing any samples whos ID has been added to dead_list
         res=[tup for tup in rawres if tup[0] not in self.dead_list]
@@ -362,9 +368,9 @@ class DataTable:
         
         #Find each 'x' type
         unique_x_sets=set(map(tuple, df.values))
-        print(unique_x_sets )
+        
         #ALT code = unique_cols = df.T.drop_duplicates()
-        print(f'There are {len(unique_x_sets)} found in the dataset.')
+        print(f'There are {len(unique_x_sets)} Ramanshift lists found in the dataset.')
         xlist=list(unique_x_sets)
         if len(unique_x_sets) > 1:
             pass
@@ -428,10 +434,8 @@ class DataTable:
             DataFrame with rows corresponding to sample ID and columns corresponding to Raman shift index.
         """
         #Grab data from DB
-        if self.condition:
-            rawres=self.query(f'SELECT {self.id}, {self.y} FROM {self.table} {self.condition}')
-        else:
-            rawres=self.query(f'SELECT {self.id}, {self.y} FROM {self.table}')
+        rawres=self.grab_raw_data(self.y)
+        
         #Filter rawres by removing any samples whos ID has been added to dead_list
         res=[tup for tup in rawres if tup[0] not in self.dead_list]
         
@@ -487,10 +491,8 @@ class DataTable:
         print(names)
         
         #Get data 
-        if self.condition:
-            rawres=self.query(f'SELECT {self.id}, {names} FROM {self.table} {self.condition}')
-        else:
-            rawres=rawres=self.query(f'SELECT {self.id}, {names} FROM {self.table}')
+        rawres=self.grab_raw_data(cols=names)
+            
         #Turn result into a dictionary with sample ID as the key
         res=[tup for tup in rawres if tup[0] not in self.dead_list]
         if val_as_tup==False:
@@ -499,7 +501,6 @@ class DataTable:
             id_dic={tup[0]:tup[1:] for tup in res}
         return id_dic
     
-
     def names(self,id_list): #look at the mapnames function
         '''Retrieves names corresponding to the index values of a DataFrame.
 
@@ -519,7 +520,6 @@ class DataTable:
         name_list=[self.name_dic()[id] for id in id_list]
         return name_list
 
-        
     def average_lists(self,*lists):
         '''Example:
         l1  =  [3,4,3]

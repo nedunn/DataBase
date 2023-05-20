@@ -186,7 +186,8 @@ class multivar:
                         # color_continuous_scale=px.colors.sequential.Jet, range_color=(0,-20),  #Jet,
                         )
 
-        # fig.update_layout(height=800)#, showlegend=False)#, template='simple_white')
+        fig.update_layout(height=800)#, showlegend=False)#, template='simple_white')
+        
 
         fig.update_layout(scene=dict(
             xaxis_title=f'{x} ({explained[x]}%)',
