@@ -21,13 +21,15 @@ class multivar:
     The index values for each row should be the sampleID.
     Dictionaries can be used to set the labels for hovertext, color, and symbol.''' 
     def __init__(self,intens,rs,
-                 namedic,
-                 symbol=None,
+                 name_dic,
+                 symbol_dic=None,
+                 hover_dic=None,
                 #  names, 
-                 color_dict = None,
+                 
                  color_by=None,
                  hover=None,
-                 ncomp=10):
+                 ncomp=10,
+                 color_dict=None): #color_dic is color assignment for name values?
         
         self.sampid=intens.index.to_list()
         
@@ -35,30 +37,20 @@ class multivar:
         self.rs=rs #series
         self.ncomp=ncomp
 
-        self.name_dic=namedic
-        self.symbol_dic=symbol
-        self.hover_dic=hover
+        self.color_dict=color_dict
 
-        # self.names, self.hover, self.color = self.sampid, self.sampid, self.sampid
-        # self.color=names #remove
-        # self.symbol=names #remove
+        # Set dictionaries for labeling
+        self.name_dic=name_dic
+        if symbol_dic==None:
+            self.symbol_dic=self.name_dic
+        else:
+            self.symbol_dic=symbol_dic
+        # self.symbol_dic = self.name_dic if symbol_dic is None else symbol_dic
+        if hover_dic==None:
+            self.hover_dic=self.name_dic
+        else:
+            self.hover_dic=hover_dic
 
-        # self.names=list(names)
-
-        # # self.color_dict=color_dict,
-        # if color_by==None:
-        #     self.color=self.names
-        # else:
-        #     self.color=list(color_by)
-        # if hover==None:
-        #     self.hover=self.names
-        # else:
-        #     self.hover=hover
-        # if symbol==None:
-        #     self.symbol=self.names
-        # else:
-            # self.symbol=symbol
-        
         self.rs_ax='Raman Shift (cm-1)'
 
     def label_gen(self,prefix,n):
@@ -95,35 +87,46 @@ class multivar:
         loadings=pd.DataFrame(X,columns=pc_labels,index=self.rs)
         return pcs, loadings, explained
     
-    def pxfig(self,df,x,y,color,color_dict=None):
-        syms=self.symbol_gen(len(df))
-        fig=px.scatter(df,x=x,y=y,color=color,
-                    #    color_discrete_map=color_dict,
-                    #    color_continuous_scale=px.colors.qualitative.T10,
-                    #    range_color=(-18,10),
-                    #    symbol_sequence=syms, symbol=self.symbol,
-                        symbol_sequence=['square','circle','diamond','cross'],
-                        symbol=self.color,
-                       #symbol_sequence=syms, symbol=self.names, #For color blind friendly figure
-                       template='simple_white',hover_name=self.hover)
+    def prep_labels(self, df):
+        namelist = [self.name_dic.get(idx, idx) for idx in df.index]
+        symlist = [self.symbol_dic.get(idx, idx) for idx in df.index] if self.symbol_dic is not None else None
+        hoverlist = [self.hover_dic.get(idx, idx) for idx in df.index] if self.hover_dic is not None else namelist
+        return namelist, symlist, hoverlist
         
-        # fig.update_xaxes(range=[0.8,0.9])
-        fig.update_traces(marker_size=10)
+
+    def pxfig(self,df,x_col,y_col):
+        #some code to turn on/off 'color blind mode'
+        #move to initial attributes?
+        if self.name_dic == self.symbol_dic:
+            print('pxfig note: add a color blind mode option here')
+        else:
+            print('pxfig note: different labels for symbols vs colors')
+
+        names, symbols, hover = self.prep_labels(df)
+        
+        fig=px.scatter(df, x=x_col, y=y_col,
+                       color=names, symbol=symbols, hover_name=hover,
+                       color_discrete_map=self.color_dict)
+        # TO ADD
+        # + symbol_squence
+        # + color_discrete_map = color_map_dictionary
+        # + fig.update_traces(marker_size=10)
         return fig
 
-    def pca_figs(self,x,y,color=None,color_dict=None):
-        if color is None:
-            color=self.names
-
+    def pca_figs(self,x_col,y_col,x_ax_range=None,y_ax_range=None):
         pcs,loadings,explained=self.pca_run()
+        names, symbols, hover = self.prep_labels(pcs)
+        x,y=x_col,y_col
 
         #PCA scatter plot
-        fig1=self.pxfig(pcs,x,y,color,color_dict=color_dict)
+        fig1=self.pxfig(pcs,x,y)#,color,color_dict=color_dict)
         fig1.update_layout(title='%s vs %s'%(x,y),font_size=20)
         fig1.update_xaxes(title_text='%s (%s%s)'%(x,explained[x],'%'),
-                          range=[0.8,1])
+                        range=x_ax_range)  # [0.8,1] dop range?
+                                
         fig1.update_yaxes(title_text='%s (%s%s)'%(y,explained[y],'%'),
-                          range=[0,0.5])
+                          range=y_ax_range) #0,0.5 dop range?
+                        
         
         # save_name='pc_zoom_mix'
         # pio.write_image(fig,'/mnt/c/Users/16162/Desktop/%s.svg'%save_name,
@@ -139,6 +142,7 @@ class multivar:
                     title='%s (%s%s)'%(y,explained[y],'%'),template='simple_white',
                     labels={y:'','index':self.rs_ax})
         #fig.show()
+        # fig1.show()
         return fig1,fig2,fig3
 
     def loadings(self,*pcs):
@@ -164,31 +168,18 @@ class multivar:
         pcs,loadings,explained=self.pca_run()
         
         #Get list for how to color datapoints on plot   
-        namelist=[self.name_dic.get(idx,idx) for idx in pcs.index]
-        if self.symbol_dic is None:
-            symlist=None
-        else:
-            symlist=[self.symbol_dic.get(idx,idx) for idx in pcs.index]
-        if self.hover_dic is None:
-            hoverlist=namelist
-        else:
-            hoverlist=[self.hover_dic.get(idx,idx) for idx in pcs.index]
+        names, symbols, hover = self.prep_labels(pcs)
 
-        input('Press ENTER to continue...')
-
-        fig=px.scatter_3d(pcs,x=x,y=y,z=z, color=namelist,
-                          symbol=symlist,
-                          hover_name=hoverlist
+        fig=px.scatter_3d(pcs,x=x,y=y,z=z, color=names,
+                          symbol=symbols,
+                          hover_name=hover
                         # color_discrete_map=self.color_dict,
-                        # symbol=self.symbol,
-                        # hover_name=self.hover,
                         # symbol_sequence=self.symbol_gen(len(color)),
                         # color_continuous_scale=px.colors.sequential.Jet, range_color=(0,-20),  #Jet,
                         )
 
         fig.update_layout(height=800)#, showlegend=False)#, template='simple_white')
         
-
         fig.update_layout(scene=dict(
             xaxis_title=f'{x} ({explained[x]}%)',
             yaxis_title=f'{y} ({explained[y]}%)',
@@ -200,17 +191,13 @@ class multivar:
         # fig.update_xaxes(showline=True, linewidth=5, linecolor='black')
         return fig
 
-    def pca_fig(self,xpc,ypc):#,color_dict):
-        #delete?
-        figs=self.pca_figs(xpc,ypc,color=self.color)
-        figs[1].show()
-        figs[2].show()
-
-    def pca_fig(self,figs):
+    def pca_fig(self,x_col,y_col):
+        figs=self.pca_figs(x_col, y_col)
         fig=make_subplots(rows=2,cols=2,specs=[[{'rowspan':2},{}],[None,{}]],
                           subplot_titles=[
                           figs[0].layout.title.text,figs[1].layout.title.text,figs[2].layout.title.text],
                           vertical_spacing=0.35)
+        
         for trace in figs[0].data:
             fig.add_trace(trace,row=1,col=1)
             fig.update_xaxes(title_text=figs[0].layout.xaxis.title.text,row=1,col=1)

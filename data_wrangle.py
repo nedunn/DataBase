@@ -109,7 +109,7 @@ class DataTable:
         cols=[col[1] for col in columns]
         return cols
     
-    def data_info(self, *incols):
+    def summary(self, *incols):
         # if len (incols)==0:
             # return self.table_info()
         if not incols:
@@ -119,8 +119,10 @@ class DataTable:
                 stmt=f'SELECT COUNT(*) FROM {self.table} {self.condition}'
             else:
                 stmt=f'SELECT COUNT(*) FROM {self.table}'
-            print(f'Number of samples selected: {self.query(stmt)[0][0]}')
-            return self.col_info(*incols)
+            display=f'Currently the dataset is accessing {self.query(stmt)[0][0]} samples from the database.'
+            display=+'Summaries of the data in the selected columns '
+            for col_table in self.col_info(*incols):
+                print(col_table)
 
     def col_info(self, *incols):
         """
@@ -136,6 +138,7 @@ class DataTable:
             A list of PrettyTable objects, each containing information about the unique values and their frequency for the 
             specified columns.
         """
+
         if not incols:
             print(f"Error col_info(): Please specify at least one column name.")
             return []
@@ -304,25 +307,17 @@ class DataTable:
     
     def raman_shifts(self,  **kwargs):
         '''
-        Retrieve Raman shift data from the database and perform outlier detection.
+        Performs analysis on Raman shift data stored in a database table.
+        The function retrieves the data from the database, filters it based on certain conditions,
+        calculates various statistics and identifies outliers. It returns the mean values per Raman shift.
+        Outliers are printed to the console. 
+        The dead_list instance variable is updated with the sample IDs of samples that have been filtered out.
 
         Args:
-        - len_range (list of int): Optional. A list specifying the expected range of lengths
-        for Raman shift data. Samples with lengths outside of this range will be removed
-        and their sample IDs will be added to the dead_list.
+            **kwargs: Additional keyword arguments for future expansion.
 
         Returns:
-        - mean (pandas.Series): A series containing the mean values of each Raman shift.
-
-        Raises:
-        - None.
-
-        This method retrieves Raman shift data from the database table, filters out samples
-        whose lengths are outside the expected range, and performs outlier detection on the
-        remaining samples. The dead_list instance variable is updated with the sample IDs
-        of the filtered out samples. The method returns a series containing the mean values
-        of each Raman shift. Outliers are printed to the console.
-
+            mean (pandas.Series): Series of mean values per Raman shift.
         '''
         #Grab data from DB
         rawres=self.grab_raw_data(cols=self.x)
@@ -460,7 +455,7 @@ class DataTable:
     def apply_snv(self,df):
         res=np.zeros_like(df)
         
-    def name_dic(self,cols=[], val_as_tup=False): #original func(names)
+    def label_dic(self,cols=[], val_as_tup=False): #original func(names)
         """
         Returns a dictionary of sample names (or any other specified metadata)
         for each sample ID in the database table.
@@ -517,7 +512,7 @@ class DataTable:
             >>> print(result)
             ['NameA', 'NameB', 'NameC']'''
         id_list=list(id_list)
-        name_list=[self.name_dic()[id] for id in id_list]
+        name_list=[self.label_dic()[id] for id in id_list]
         return name_list
 
     def average_lists(self,*lists):
