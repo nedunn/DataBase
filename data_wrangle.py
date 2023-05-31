@@ -43,6 +43,7 @@ def map_index(df,namedic):
     return res
 
 class DataTable:
+
     def __init__(self, db_path,table_name=None):
         #Connect to DB
         self.conn=sqlite3.connect(db_path)
@@ -454,8 +455,9 @@ class DataTable:
     
     def apply_snv(self,df):
         res=np.zeros_like(df)
-        
-    def label_dic(self,cols=[], val_as_tup=False): #original func(names)
+    
+    def label_dic(self,cols=[], val_as_tup=False, include_col_name=True,
+                  drop_deadlisted=False): #original func(names)
         """
         Returns a dictionary of sample names (or any other specified metadata)
         for each sample ID in the database table.
@@ -483,18 +485,33 @@ class DataTable:
             print('\'cols\' input must be a list.')
             cols=self.name_cols
         names=(', ').join(cols)
-        print(names)
         
         #Get data 
         rawres=self.grab_raw_data(cols=names)
             
         #Turn result into a dictionary with sample ID as the key
-        res=[tup for tup in rawres if tup[0] not in self.dead_list]
+        if drop_deadlisted:
+            res=[tup for tup in rawres if tup[0] not in self.dead_list] #Remove deadlisted spectra
+        else:
+            res=[tup for tup in rawres]
+
+        if include_col_name: #force tuple dictionary for easy adding of column names
+            val_as_tup=True
+
         if val_as_tup==False:
             id_dic={tup[0]:self.name_join.join(str(val) for val in tup[1:]) for tup in res}
         else:
             id_dic={tup[0]:tup[1:] for tup in res}
-        return id_dic
+
+        if include_col_name:
+            res={}
+            for id, tup in id_dic.items():
+                new_tup=tuple(f'{item} {cols[i % len(cols)]}' for i, item in enumerate(tup))
+                res_tup=', '.join(new_tup)
+                res[id] = res_tup
+            return res
+        else:
+            return id_dic
     
     def names(self,id_list): #look at the mapnames function
         '''Retrieves names corresponding to the index values of a DataFrame.
