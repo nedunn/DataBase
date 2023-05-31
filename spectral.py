@@ -43,9 +43,11 @@ def oversat_check(spectrum, threshold=0.1, window=5):
     return False
 
 class Spectral:
-    def __init__(self, data_df, raman_shifts, name_dict=None, set_dict=None):
+    def __init__(self, data_df, raman_shifts, name_dict=None, set_dict=None, color_dict=None):
         self.df = data_df
         self.rs = raman_shifts
+
+        self.color_dict=color_dict
         
         if name_dict:
             self.name_dict = name_dict
@@ -58,8 +60,10 @@ class Spectral:
             self.set_dict=name_dict
             self.sets=self.groups
         
-        trunc_start=None
-        trunc_end=None
+        self.trunc_before_x=None
+        self.trunc_after_x=None
+        
+        self.show_deviation=False
             
     def get_groups(self):
         """
@@ -99,21 +103,40 @@ class Spectral:
             ave_stds[group]=(ave,std)
         return ave_stds
     
+    def apply_truncate(self,fig):
+        if self.trunc_before_x is None and self.trunc_after_x is None:
+            pass
+        elif self.trunc_before_x is not None and self.trunc_after_x is None:
+            fig.update_xaxes(range=[self.trunc_before_x, self.rs[len(self.rs)-1]])
+        elif self.trunc_before_x is None and self.trunc_after_x is not None:
+            fig.update_xaxes(range=[self.rs[0], self.trunc_after_x])
+        elif self.trunc_before_x is not None and self.trunc_after_x is not None:
+            fig.update_xaxes(range=[self.trunc_before_x,self.trunc_after_x])
+        return fig
+    
+    def return_trunc_df(self):
+        pass
+
     def single_plot(self,groups=[],show_std=False):
         if len(groups)==0:
             datas=self.ave_spectra(self.groups)
         else:
             print('error: Natalie hasnt finished this stuff.')
         traces=[]
+        
         if show_std:
             for group in datas:
+                # print(self.color_dict[group])
+                print(type(group))
                 traces.append(go.Scatter(x=self.rs, y=datas[group][0], name=group))
                 traces.append(go.Scatter(x=self.rs, y=datas[group][0] + datas[group][1], mode='lines', name=f'{group}+', line=dict(color='lightgrey',width=0.5)))
                 traces.append(go.Scatter(x=self.rs, y=datas[group][0] - datas[group][1], mode='lines', name=f'{group}-', line=dict(color='rgba(239, 239, 240, 0.1)',width=0.5),fill='tonexty')) #smokewhite=236 all
         else:
-            traces=[go.Scatter(x=self.rs, y=datas[group][0], name=group) for group in datas]
+            
+            traces=[go.Scatter(x=self.rs, y=datas[group][0], name=group, line=dict(color=self.color_dict[group])) for group in datas]
         fig=go.Figure(traces)
         fig.update_layout(template='simple_white')
+        fig=self.apply_truncate(fig)
         return fig
     
     def frame_plot(self, groups=[],show_std=False,trace_height=300):
@@ -154,7 +177,7 @@ class Spectral:
         for i, set_name in enumerate(self.set_dict):
             group_name_list=self.set_dict[set_name]
             for group in group_name_list:
-                fig.add_trace(go.Scatter(x=self.rs,y=datas[group][0],name=group),row=i+1, col=1)
+                fig.add_trace(go.Scatter(x=self.rs,y=datas[group][0],name=group,color='black'),row=i+1, col=1)
         fig.update_layout(template='simple_white',height=trace_height*len(datas))
         
         # Adjust title location
