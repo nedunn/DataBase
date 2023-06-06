@@ -15,6 +15,9 @@ from plotly.subplots import make_subplots
 import scipy.signal as ss
 import pybaselines.spline as py
 
+from sklearn.model_selection import LeaveOneOut
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import cross_val_score
 
 class multivar:
     '''Input dataframe is expected to have Raman shift as columns and rows are samples.
@@ -29,12 +32,11 @@ class multivar:
                  color_by=None,
                  hover=None,
                  ncomp=10,
-                 color_dict=None): #color_dic is color assignment for name values?
+                 color_dict=None, #color_dic is color assignment for name values?
+                 **kwargs): 
         
         self.sampid=intens.index.to_list()
         
-        self.intens=intens.T #df
-        self.rs=rs #series
         self.ncomp=ncomp
 
         self.color_dict=color_dict
@@ -53,6 +55,13 @@ class multivar:
 
         self.rs_ax='Raman Shift (cm-1)'
 
+        #Truncation values
+        self.trunc_before_x=None
+        self.trunc_after_x=None
+        self.__dict__.update(kwargs)
+
+        self.intens, self.rs = self.prep_intens(intens,rs)
+
     def label_gen(self,prefix,n):
         nums=list(range(1,n+1))
         res=['%s %s'%(prefix, num) for num in nums]
@@ -66,6 +75,36 @@ class multivar:
             times_to_mult=ceil((len_needed/len(syms)))
             rep_syms=syms*times_to_mult
             return rep_syms[0:len_needed]
+
+    def prep_intens(self, init_df, rs):
+        init_df.columns=rs
+        
+        # No truncate
+        if self.trunc_before_x is None and self.trunc_after_x is None:
+            df=init_df
+            cols=df.columns.values
+            
+        # Only truncate before
+        elif self.trunc_before_x is not None and self.trunc_after_x is None:
+            closest_column = rs[np.abs(rs - self.trunc_before_x).argmin()]
+            df=init_df.truncate(before=closest_column, axis='columns')
+            cols=df.columns.values
+
+        # Only truncate after
+        elif self.trunc_before_x is None and self.trunc_after_x is not None:
+            closest_column = rs[np.abs(rs - self.trunc_after_x).argmin()]
+            df=init_df.truncate(after=closest_column, axis='columns')
+            cols=df.columns.values
+
+        # Truncate before and after
+        elif self.trunc_before_x is not None and self.trunc_after_x is not None:
+            before_column = rs[np.abs(rs - self.trunc_before_x).argmin()]
+            after_column = rs[np.abs(rs - self.trunc_after_x).argmin()]
+            df=init_df.truncate(before=before_column, after=after_column, axis='columns')
+            cols=df.columns.values
+
+        # Return result
+        return df.T, cols
 
     def pca_run(self):
         pca=decomposition.PCA(n_components=self.ncomp)
@@ -93,7 +132,6 @@ class multivar:
         hoverlist = [self.hover_dic.get(idx, idx) for idx in df.index] if self.hover_dic is not None else namelist
         return namelist, symlist, hoverlist
         
-
     def pxfig(self,df,x_col,y_col):
         #some code to turn on/off 'color blind mode'
         #move to initial attributes?
@@ -107,10 +145,11 @@ class multivar:
         fig=px.scatter(df, x=x_col, y=y_col,
                        color=names, symbol=symbols, hover_name=hover,
                        color_discrete_map=self.color_dict)
+        fig.update_traces(marker=dict(size=10))
         # TO ADD
         # + symbol_squence
         # + color_discrete_map = color_map_dictionary
-        # + fig.update_traces(marker_size=10)
+        
         return fig
 
     def pca_figs(self,x_col,y_col,x_ax_range=None,y_ax_range=None):
@@ -146,6 +185,7 @@ class multivar:
         return fig1,fig2,fig3
 
     def loadings(self,*pcs):
+        
         pcs_df, load, explain = self.pca_run()
         figs=[]
 
@@ -172,8 +212,9 @@ class multivar:
 
         fig=px.scatter_3d(pcs,x=x,y=y,z=z, color=names,
                           symbol=symbols,
-                          hover_name=hover
-                        # color_discrete_map=self.color_dict,
+                          hover_name=hover,
+                          color_discrete_map=self.color_dict,
+                        #   marker=dict(size=50)
                         # symbol_sequence=self.symbol_gen(len(color)),
                         # color_continuous_scale=px.colors.sequential.Jet, range_color=(0,-20),  #Jet,
                         )
@@ -216,3 +257,33 @@ class multivar:
                           font_size=20,
                           font_family='ariel')
         return fig
+    
+    def loo(self,mute=True):
+        df, load, explain = self.pca_run()
+
+        mse_dic={}
+        mse_list=[]
+
+        cv=LeaveOneOut()
+        model=LinearRegression()
+
+        for i in range(len(df)): #for each row in the `pca scores df`...
+            test=df.iloc[i:i+1] #grab a row of data
+            rest_index=[val for val in list(range(len(df))) if val != i]
+            rest=df.iloc[rest_index] #grab the remaining data
+
+
+            if mute==False:
+                print(f'Currently performing LOO on sample #{i}')
+
+            scores=cross_val_score(model, test.T, rest.T, scoring='neg_mean_absolute_error', cv=cv, n_jobs=-1)
+            score=np.mean(np.absolute(scores))
+            mse_list.append(score)
+        
+        # stmt=f'Average MSE: {round(np.mean(np.absolute(scores)),4)}\n'
+        # stmt+=f'Average RMSE: {round(np.sqrt(np.mean(np.absolute(scores))),4)}'
+        # print(stmt)
+        mse=np.sum(mse_list)/len(mse_list)
+
+        print(mse)
+
