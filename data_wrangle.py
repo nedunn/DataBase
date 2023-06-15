@@ -8,6 +8,7 @@ from prettytable import PrettyTable as pt
 from prettytable import ALL
 import preprocess
 from collections import Counter
+import __utils__
 
 def unique_count(lst):
     result={}
@@ -61,7 +62,7 @@ class DataTable:
             print(stmt)
         self.table=table_name
 
-        self.name_cols=['filename','frame']
+        self.name_cols=('filename', 'frame')
         self.name_join=', '
         
         self.x='raman_shift' #Database table name where 'x' values are stored
@@ -74,7 +75,6 @@ class DataTable:
         #Track sample IDs that are dropped bc they are flagged with outliers
         self.dead_list=[] #IDs of samples
         self.all_ids=self.get_ids()
-        # self.ids=self.query(f'SELECT {self.id} FROM {self.table}')
 
     def __del__(self):
         '''Automaticallly close the database connection when the object is destroyed (program terminated).'''
@@ -99,31 +99,52 @@ class DataTable:
         2)Performance: Using parameters can improve query performance by allowing the database engine to optimize the execution plan for the query.
         3)Reusability: By using parameters, you can reuse the same query with different input values. This can save you time and effort in writing and maintaining multiple similar queries.'''
 
-    def get_ids(self):
-        ids_badformat=self.query(f'SELECT {self.id} FROM {self.table}')
+    def get_ids(self, condition=False):
+        if condition:
+            ids_badformat=self.query(f'SELECT {self.id} FROM {self.table} {condition}')
+        else:
+            ids_badformat=self.query(f'SELECT {self.id} FROM {self.table}')
         ids=[item[0] for item in ids_badformat]
         return ids
-
+    
+    def select_ids(self):
+        return self.get_ids(condition=self.condition)
+    
     def columns(self):
         '''Returns a list of column names in the current database table.'''
         columns=self.query(f'PRAGMA table_info({self.table})')
         cols=[col[1] for col in columns]
         return cols
     
-    def summary(self, *incols):
+    def summary(self,*incols,detail='low'):
+        if detail == 'low':
+            self.small_sum()
+        elif detail == 'high':
+            self.high_sum(*incols)
+
+    def high_sum(self, *incols):
         # if len (incols)==0:
             # return self.table_info()
         if not incols:
             return self.table_info()
         else:
             if self.condition:
-                stmt=f'SELECT COUNT(*) FROM {self.table} {self.condition}'
+                stmt=f'SELECT COUNT (*) FROM {self.table} {self.condition}'
             else:
-                stmt=f'SELECT COUNT(*) FROM {self.table}'
-            display=f'Currently the dataset is accessing {self.query(stmt)[0][0]} samples from the database.'
-            display=+'Summaries of the data in the selected columns '
+                stmt=f'SELECT COUNT (*) FROM {self.table}'
+            display=f'Currently the dataset is accessing {self.query(stmt)[0][0]} samples from the database.\n'
+            display+=('+')
+            display+=('-'*47)
+            display+=('+')
+            display+=('\n|Summaries of the data in the selected columns: | ')
+            print(display)
             for col_table in self.col_info(*incols):
                 print(col_table)
+
+    def small_sum(self):
+        print(f'All IDs: {len(self.all_ids)}')
+        print(f'Selected IDs: {len(self.select_ids())}')
+        print(f'Condition: {self.condition}')
 
     def col_info(self, *incols):
         """
@@ -228,7 +249,7 @@ class DataTable:
             sqlite3.Error: If there is an error executing the INSERT statement.
         """
         #Make sure user wants to update the data table
-        input('Press ENTER to continue...')
+        # input('Press ENTER to continue...')
 
         #Column portion of the statement
         collist=[cv[0] for cv in col_val]
@@ -294,12 +315,16 @@ class DataTable:
         
         return clean
     
-    def grab_raw_data(self,cols=None):
+    def grab_raw_data(self,*cols):
         # SELECT CONCAT(column1, column2) AS combined_values
         # FROM your_table
         # WHERE CONCAT(column1, column2) NOT IN ('10', '01');
         # if len(cols) > ... use concat?                                                                                                                                                                                                                                                                                                                                                                        
 
+        if cols==None:
+            pass
+        else:
+            cols=', '.join(cols)
         if self.condition:
             rawres=self.query(f'SELECT {self.id}, {cols} FROM {self.table} {self.condition}')
         else:
@@ -321,7 +346,7 @@ class DataTable:
             mean (pandas.Series): Series of mean values per Raman shift.
         '''
         #Grab data from DB
-        rawres=self.grab_raw_data(cols=self.x)
+        rawres=self.grab_raw_data(self.x)
        
         #Filter rawres by removing any samples whos ID has been added to dead_list
         res=[tup for tup in rawres if tup[0] not in self.dead_list]
@@ -418,7 +443,7 @@ class DataTable:
                 self.dead_list.append(sample)
 
         return mean
-    
+
     def intens(self):
         """
         Returns a Pandas DataFrame of the preprocessed Raman spectra intensity data, with rows
@@ -456,7 +481,7 @@ class DataTable:
     def apply_snv(self,df):
         res=np.zeros_like(df)
     
-    def label_dic(self,cols=[], val_as_tup=False, include_col_name=True,
+    def Xlabel_dict(self,cols=[], val_as_tup=False, include_col_name=True,
                   drop_deadlisted=False): #original func(names)
         """
         Returns a dictionary of sample names (or any other specified metadata)
@@ -479,16 +504,13 @@ class DataTable:
         #Format col names depending on if more than 1 column is entered
         # if len(self.name_cols)>1:
         if len(cols)==0:
-            cols=self.name_cols
-            print('if')
-        if type(cols)!=list:
-            print('\'cols\' input must be a list.')
-            cols=self.name_cols
-        names=(', ').join(cols)
+            cols=', '.join(self.name_cols)
+            print(f'Defalut name cols called: {(cols)}')
+
+        # #Get data 
+        # print('may need to troubleshoot from grab_raw_data and label_dict - 6/14/23')
+        rawres=self.grab_raw_data(cols)
         
-        #Get data 
-        rawres=self.grab_raw_data(cols=names)
-            
         #Turn result into a dictionary with sample ID as the key
         if drop_deadlisted:
             res=[tup for tup in rawres if tup[0] not in self.dead_list] #Remove deadlisted spectra
@@ -504,12 +526,14 @@ class DataTable:
             id_dic={tup[0]:tup[1:] for tup in res}
 
         if include_col_name:
-            res={}
-            for id, tup in id_dic.items():
-                new_tup=tuple(f'{item} {cols[i % len(cols)]}' for i, item in enumerate(tup))
-                res_tup=', '.join(new_tup)
-                res[id] = res_tup
-            return res
+            pass
+            # res={}
+            # for id, tup in id_dic.items():
+                
+            #     new_tup=tuple(f'{item} {cols[i % len(cols)]}' for i, item in enumerate(tup))
+            #     res_tup=', '.join(new_tup)
+            #     res[id] = res_tup
+            # return res
         else:
             return id_dic
     
@@ -619,3 +643,87 @@ class DataTable:
             return (name,x,y)
         else:
             print('Error: \'ids\' argument must be a tuple.')
+
+    def dataset(self,  show_x_summary=False, dropnans=True, summary=True):
+
+        rawres=self.grab_raw_data(self.x,self.y)
+
+        #Filter rawres by removing any samples whos ID has been added to dead_list
+        # res=[tup for tup in rawres if tup[0] not in self.dead_list]
+
+        #Convert byte data in raw tuples to list data
+        all_tup_list=[(tup[0],self.blob2list(tup[1]),self.blob2list(tup[2])) for tup in rawres]
+        
+        # Make each spectra a dataframe with single row
+        dfs=[]
+        for tup in all_tup_list:
+            unique_index=__utils__.modify_duplicates(tup[1])
+            df=pd.DataFrame(tup[2], index=unique_index, columns=[tup[0]])
+            dfs.append(df)
+
+        # # Check out `x`s
+        # summary=__utils__.summarize_lists([tup[1] for tup in all_tup_list])
+        #the ** happened to my function in __utils__??!?
+        # if show_x_summary:
+        #     for xlst in summary:
+        #         print(xlst)
+        
+        stmt=f'\tNumber of samples compiled: {len(dfs)}'
+
+        df1=pd.concat(dfs,axis=1)
+        stmt+=f'\n\tInitial dataset contains {df1.shape[0]} Raman Shifts and {df1.shape[1]} individual spectra.'
+
+        if dropnans:
+            df=df1.dropna()
+            stmt+=f'\n\tFinal DF contains {df.shape[0]} Raman Shifts and {df.shape[1]} individual spectra.'
+            stmt+=f'\n\t`NaN` values were removed.'
+        else:
+            df=df1
+            stmt+='\n\tDF returned with possible `NaN` values.'
+        if summary:
+            print('DataFrame Returned:')
+            print(stmt)
+        return df        
+
+    def label_dict(self,*cols, val_as_tup=False, include_col_name=True,
+                  drop_deadlisted=False, name_sep=', '): #original func(names)
+        # Check for inputs
+        if len(cols)==0:
+            cols=self.name_cols
+            if type(cols) is str:
+                col_str=cols
+            else:
+                col_str=name_sep.join(cols)
+        elif len(cols) == 1:
+            col_str=cols[0]
+        elif len(cols) > 1:
+            col_str=name_sep.join(cols)
+        # print(f'{col_str}\n\ttype: {type(col_str)}\n\t{len(col_str)}')
+
+        # Access DB, get tuples
+        rawres=self.grab_raw_data(col_str)
+        
+        # Return dictionary: {ID:Name}
+        res={}
+        if include_col_name==True:
+            # *Optional* add column names to each value
+            for tup in rawres:
+                new_items=[]
+                for item in tup[1:]:
+                    idx=tup.index(item)
+                    new_item=f'{item} {cols[idx-1]}'
+                    new_items.append(new_item)
+                    #if val_as_tup == False: #Get the returns as a dictionary where 'id' = key
+                res[tup[0]]=name_sep.join(new_items)    
+        elif include_col_name==False:
+            for tup in rawres:
+                new_items=[]
+                for item in tup[1:]:
+                    new_item=f'{item}'
+                    new_items.append(new_item)
+                res[tup[0]]=name_sep.join(new_items)
+        else:
+            return 'Error: `include_col_name` must be either `True` or `False`.'
+        
+        return res
+    
