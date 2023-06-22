@@ -1,6 +1,5 @@
 #Datatable linker CSV->DB DB->DF
 import sqlite3
-import os
 import pandas as pd
 import numpy as np
 import json
@@ -9,6 +8,13 @@ from prettytable import ALL
 import preprocess
 from collections import Counter
 import __utils__
+import scipy.signal as ss
+import pybaselines.spline as py
+# from scipy.sparse import csc_matrix, eye, diags #smooth.whitaker
+# from scipy.sparse.linalg import spsolve #smooth.whitaker
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
 
 def unique_count(lst):
     result={}
@@ -117,6 +123,8 @@ class DataTable:
         return cols
     
     def summary(self,*incols,detail='low'):
+        if len(incols) !=0:
+            detail='high'
         if detail == 'low':
             self.small_sum()
         elif detail == 'high':
@@ -331,7 +339,7 @@ class DataTable:
             rawres=self.query(f'SELECT {self.id}, {cols} FROM {self.table}') 
         return rawres
     
-    def raman_shifts(self,  **kwargs):
+    def FLAGraman_shifts(self,  **kwargs):
         '''
         Performs analysis on Raman shift data stored in a database table.
         The function retrieves the data from the database, filters it based on certain conditions,
@@ -444,7 +452,8 @@ class DataTable:
 
         return mean
 
-    def intens(self):
+    def FLAGintens(self):
+        # Will need to be updated to work with PreproSpectra class, rather than old `preprocess.py` 6-16-23
         """
         Returns a Pandas DataFrame of the preprocessed Raman spectra intensity data, with rows
         corresponding to the sample ID and columns corresponding to the Raman shift index.
@@ -481,63 +490,7 @@ class DataTable:
     def apply_snv(self,df):
         res=np.zeros_like(df)
     
-    def Xlabel_dict(self,cols=[], val_as_tup=False, include_col_name=True,
-                  drop_deadlisted=False): #original func(names)
-        """
-        Returns a dictionary of sample names (or any other specified metadata)
-        for each sample ID in the database table.
-
-        Args:
-        - table_col_id (str): the name of the column in the database table containing the unique
-                              identifier for each sample. Defaults to 'id'.
-        - name_cols (list of str): a list of column names in the database table containing the
-                                   sample names or other metadata. Defaults to ['filename', 'frame',
-                                   'general_loc'].
-
-        Returns:
-        - A dictionary with sample IDs as keys, and a tuple of sample names/metadata as values.
-
-        Example usage:
-        db.names()  # Returns a dictionary of all sample names/metadata for all samples in the database
-        db.names(name_cols=['filename'])  # Returns a dictionary of filenames for all samples in the database
-        """
-        #Format col names depending on if more than 1 column is entered
-        # if len(self.name_cols)>1:
-        if len(cols)==0:
-            cols=', '.join(self.name_cols)
-            print(f'Defalut name cols called: {(cols)}')
-
-        # #Get data 
-        # print('may need to troubleshoot from grab_raw_data and label_dict - 6/14/23')
-        rawres=self.grab_raw_data(cols)
-        
-        #Turn result into a dictionary with sample ID as the key
-        if drop_deadlisted:
-            res=[tup for tup in rawres if tup[0] not in self.dead_list] #Remove deadlisted spectra
-        else:
-            res=[tup for tup in rawres]
-
-        if include_col_name: #force tuple dictionary for easy adding of column names
-            val_as_tup=True
-
-        if val_as_tup==False:
-            id_dic={tup[0]:self.name_join.join(str(val) for val in tup[1:]) for tup in res}
-        else:
-            id_dic={tup[0]:tup[1:] for tup in res}
-
-        if include_col_name:
-            pass
-            # res={}
-            # for id, tup in id_dic.items():
-                
-            #     new_tup=tuple(f'{item} {cols[i % len(cols)]}' for i, item in enumerate(tup))
-            #     res_tup=', '.join(new_tup)
-            #     res[id] = res_tup
-            # return res
-        else:
-            return id_dic
-    
-    def names(self,id_list): #look at the mapnames function
+    def FLAGnames(self,id_list): #look at the mapnames function
         '''Retrieves names corresponding to the index values of a DataFrame.
 
         Args:
@@ -683,7 +636,8 @@ class DataTable:
         if summary:
             print('DataFrame Returned:')
             print(stmt)
-        return df        
+            print('\tRow index = sample ID || Column header = Raman Shift')
+        return df.T 
 
     def label_dict(self,*cols, val_as_tup=False, include_col_name=True,
                   drop_deadlisted=False, name_sep=', '): #original func(names)
@@ -726,4 +680,273 @@ class DataTable:
             return 'Error: `include_col_name` must be either `True` or `False`.'
         
         return res
+
+class PreproSpectra:
+    """
+    A class for preprocessing a Raman spectra.
+
+    Parameters
+    ----------
+    original_intensity : list or array-like
+        The original intensity values of the spectral data.
+
+    raman_shifts : list or array-like, optional
+        The corresponding Raman shift values. If not provided, bogus Raman shift values will be generated.
+
+    alerts : bool, optional
+        Flag indicating whether to display alerts generated when initializing instance.
+
+    name : str, optional
+        Name of the PreproSpectra instance.
+
+    no_neg : bool, optional
+        Flag indicating whether to replace negative intensity values with 0. Default is True.
+    """
+    def __init__(self, original_intensity, raman_shifts=None,
+                 name=None, alerts=True, no_neg=True):
+        
+        self.y=original_intensity
+        if raman_shifts is None:
+            alert=f'You did not provide Raman Shift values.\n'
+            self.x=list(range(0,len(self.y))) #Generate bogus Raman Shift values for X axis
+        elif (len(original_intensity) != len(raman_shifts)) == True:
+            alert=f'Error: the given `original_intensity` and `raman_shifts` are not of equal length.\n'
+            alert+='\tBogus values will be used instead.\n'
+            alert+=f'\tLength intensity values: {len(original_intensity)}\n\tLength RS values: {len(raman_shifts)}\n'
+            self.x=list(range(0,len(self.y)))
+        else:
+            alert=''
+            self.x=raman_shifts
+        self.name=name
+        
+        # Smoothing parameters
+        self.smooth_window=9
+        self.smooth_poly=3
+        
+        # Zap parameters
+        self.zap_window=2
+        self.zap_threshold=5
+
+        # Apply Zap
+        # self.spikes=self.detect_spikes(self.y)
+        # self.y_zap, =self.zap(self.y)
+        zap, zap_text = self.zap(self.y)
+        self.y_zap=zap
+        alert+=zap_text
+        # try:
+        #     self.y_zap=self.zap(self.y)
+        #     alert+=f'Zap has been applied with threshold = {self.zap_threshold}, window = {self.zap_window}.\n'
+        # except IndexError: #Bias IndexError for when spike is detected at edges of data=
+        #     alert+=f'Zap step has been skipped.\n'
+        # #     self.y_zap=self.y
+        
+        # Apply Smooth
+        self.y_zap_smooth=ss.savgol_filter(self.y_zap, self.smooth_window, self.smooth_poly)
+        alert+=f'Smoothing has been applied: window = {self.smooth_window}, polynomial = {self.smooth_poly}.\n'
+
+        # Baseline
+        self.baseline=py.pspline_asls(self.y_zap_smooth)[0]
+        Y=self.y_zap_smooth-self.baseline
+
+        # Return preprocessed data
+        if no_neg:
+            self.Y=list(map(lambda num: num if num >= 0 else 0, Y))
+            alert+='Intensity returned with all negative values replaced with `0`.\n'
+        else:
+            self.Y=Y
+            alert+='Intensity returned with negative values.\n\t**Set `no_neg` to `True` to remove negatives.\n'
+
+        # Display alerts
+        if alerts:
+            print(alert)
+ 
+    def zscore(self,nums):
+        """
+        Calculate the Z-scores of the given numbers.
+
+        Parameters
+        ----------
+        nums : list or array-like
+            The input numbers.
+
+        Returns
+        -------
+        zscores : ndarray
+            The Z-scores of the input numbers.
+        """
+        mean=np.mean(nums)
+        std=np.std(nums)
+        zscores1=(nums-mean)/std
+        zscores=np.array(abs(zscores1))
+        return(zscores)
+    
+    def mod_zscore(self,nums):
+        """
+        Calculate the modified Z-scores (MAD Z-scores) of the given numbers.
+
+        Parameters
+        ----------
+        nums : list or array-like
+            The input numbers.
+
+        Returns
+        -------
+        mod_z_scores : ndarray
+            The modified Z-scores (MAD Z-scores) of the input numbers.
+        """
+        median_int=np.median(nums)
+        mad_int=np.median([np.abs(nums-median_int)])
+        mod_z_scores1=0.6745*(nums-median_int)/mad_int
+        mod_z_scores=np.array(abs(mod_z_scores1))
+        return mod_z_scores
+    
+    def WhitakerHayes_zscore(self, nums, threshold):
+        """
+        Whitaker-Hayes Function using Intensity Modified Z-Scores.
+
+        Parameters
+        ----------
+        nums : list or array-like
+            The input numbers.
+        threshold : int or float
+            The threshold value.
+
+        Returns
+        -------
+        intensity_modified_zscores : ndarray
+            The intensity modified Z-scores.
+        """
+        dist=0
+        delta_intensity=[]
+        for i in np.arange(len(nums)-1):
+            dist=nums[i+1]-nums[i]
+            delta_intensity.append(dist)
+        delta_int=np.array(delta_intensity)
+        
+        #Run the delta_int through MAD Z-Score Function
+        intensity_modified_zscores=np.array(np.abs(self.mod_zscore(delta_int)))
+        return intensity_modified_zscores
+    
+    def detect_spikes(self,nums):
+        """
+        Detect spikes, or sudden, rapid changes in spectral intensity.
+
+        Parameters
+        ----------
+        nums : list or array-like
+            The input numbers.
+
+        Returns
+        -------
+        spikes : ndarray
+            Boolean array indicating whether each value is a spike (True) or not (False).
+        """
+        spikes=abs(np.array(self.mod_zscore(np.diff(nums))))>self.zap_threshold
+        return spikes
+    
+    def zap(self,nums):
+        """
+        Replace spike intensity values with the average values that are not spikes in the selected range.
+
+        Parameters
+        ----------
+        nums : list or array-like
+            The input numbers.
+        window : int = selected range
+            Selection of points around the detected spike.
+            Default = 2.
+        threshold : int
+            Binarization threshold. Increase value will increase spike detection sensitivity. (*I think*)
+            Default = 5.
+
+        Returns
+        -------
+        y_out : list or array-like
+            Window Average.
+            Average values that are around spikes in the selected range.
+        """
+        y_out=nums.copy() #Prevents overeyeride of input y
+        spikes=abs(np.array(self.mod_zscore(np.diff(nums))))>self.zap_threshold
+        try:
+            for i in np.arange(len(spikes)):
+                if spikes[i] !=0: #If there is a spike detected in position i
+                    w=np.arange(i-self.zap_window, i+1+self.zap_window) #Select 2m+1 points around the spike
+                    w2=w[spikes[w]==0] #From the interval, choose the ones which are not spikes                
+                    if not w2.any(): #Empty array
+                        y_out[i]=np.mean(nums[w]) #Average the values that are not spikes in the selected range        
+                    if w2.any(): #Normal array
+                        y_out[i]=np.mean(nums[w2]) #Average the values that are not spikes in the selected range
+            return y_out, f'Zap has been applied with threshold = {self.zap_threshold}, window = {self.zap_window}.\n'
+        except TypeError:
+            return nums, 'Zap step has been skipped.\n'
+    
+    def show(self):
+        """
+        Display the data before and after preprocessing.
+
+        Returns
+        -------
+        fig: plotly.graphs.Figure
+            The figure object containing the plot.
+        """
+        # Initalize figure
+        fig=make_subplots(rows=2, cols=1,
+                        shared_xaxes=True, shared_yaxes=True,
+                        vertical_spacing=0.05,
+                        x_title='Raman Shift (cm-1)', y_title='Intensity')
+        #add traces
+        fig.append_trace(go.Scatter(x=self.x, y=self.y, name='raw'),row=1,col=1)
+        fig.append_trace(go.Scatter(x=self.x, y=self.baseline, name='baseline'),row=1,col=1)
+        fig.append_trace(go.Scatter(x=self.x, y=self.Y, name='output'),row=2,col=1)
+        
+        # Adjust layout
+        fig.update_layout(title_text=self.name,title_font_size=15,plot_bgcolor='rgba(0,0,0,0)')
+        fig.update_xaxes(showline=True, linewidth=1, linecolor='black', gridcolor='lightgrey')
+        fig.update_yaxes(showline=True, linewidth=1, linecolor='black', gridcolor='lightgrey')
+        return fig
+    
+    def __str__(self):
+        """
+        Return a string representation of the PreproSpectra instance.
+
+        Returns
+        -------
+        str
+            A string representation of the PreproSpectra instance.
+        """
+        return f"PreproSpectra instance: {self.name if self.name else 'Unnamed'}"
+
+    def __repr__(self) -> list:
+        return repr(self.Y)
+    
+    def get(self):
+        return np.array(self.Y)
+
+class DataSet:
+    '''
+    df where index = sample ID and column = raman shift
+    '''
+    def __init__(self, df, **params):
+        n, n_rs = df.shape[0], df.shape[1]
+
+        self.ids=df.index
+        self.xax=df.columns
+        self.raw=df
+
+        self.df=self.prepro_df()
+
+    def prepro_df(self):
+        res=[]
+        for i in self.ids:
+            d=pd.DataFrame(PreproSpectra(list(self.raw.loc[i]), alerts=False).get())
+            d.columns=[i]
+            d.set_index([self.xax],inplace=True,drop=True)
+            res.append(d)        
+        return pd.concat(res,axis=1)
+    
+    def getdf(self):
+        return self.df
+        
+    def __repr__(self):
+        return repr(self.df)
     
