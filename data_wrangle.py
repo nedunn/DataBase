@@ -339,176 +339,6 @@ class DataTable:
             rawres=self.query(f'SELECT {self.id}, {cols} FROM {self.table}') 
         return rawres
     
-    def FLAGraman_shifts(self,  **kwargs):
-        '''
-        Performs analysis on Raman shift data stored in a database table.
-        The function retrieves the data from the database, filters it based on certain conditions,
-        calculates various statistics and identifies outliers. It returns the mean values per Raman shift.
-        Outliers are printed to the console. 
-        The dead_list instance variable is updated with the sample IDs of samples that have been filtered out.
-
-        Args:
-            **kwargs: Additional keyword arguments for future expansion.
-
-        Returns:
-            mean (pandas.Series): Series of mean values per Raman shift.
-        '''
-        #Grab data from DB
-        rawres=self.grab_raw_data(self.x)
-       
-        #Filter rawres by removing any samples whos ID has been added to dead_list
-        res=[tup for tup in rawres if tup[0] not in self.dead_list]
-
-        #Convert byte data in raw tuples to list data
-        all_tup_list=[(tup[0],self.blob2list(tup[1])) for tup in res]
-        #Data outside of the set range will be flagged to be dropped *self.dead_list*
-        #Filter by length -> helps to prevent mismatched data from being compared
-        table=pt(title='Samples Removed: length outside of expected range')
-        table.field_names=['Sample ID','Length']
-
-        #Find average length x input per sample
-        #May combine with "Find each x type" section of function later. I am busy ATM
-        lengths=([len(tup[1]) for tup in all_tup_list])
-        unique_lengths=(unique_count(lengths))
-        dropped_id=[]
-        if len(unique_lengths) > 1:
-            tup_list=[]
-            length_to_use=max(unique_lengths, key=unique_lengths.get) # get most common length
-            for tup in all_tup_list: 
-                if len(tup[1])==length_to_use: #keep this data
-                    tup_list.append(tup)
-                else: #remove this data
-                    table.add_row([tup[0],len(tup[1])])
-                    
-            for tup in all_tup_list:
-                table.add_row([tup[0],len(tup[1])])
-                dropped_id.append(tup[0])
-                dropped_id.append(tup[0])
-        else: #all of the x lists are the same length!
-            tup_list=all_tup_list
-
-        #Convert tuples list to dictionary
-        data_dict={t[0]:t[1] for t in tup_list} #(id,[xs values])
-
-        ###Compare xs, look for outliers
-        #Create a DF from the dictionary
-        df=pd.DataFrame.from_dict(data_dict,orient='index') #Columns = rs index, index=sampleID (int)
-        # df.iloc[0,0]=1000 #Change a value for testing purposes
-        
-        #Find each 'x' type
-        unique_x_sets=set(map(tuple, df.values))
-        
-        #ALT code = unique_cols = df.T.drop_duplicates()
-        print(f'There are {len(unique_x_sets)} Ramanshift lists found in the dataset.')
-        xlist=list(unique_x_sets)
-        if len(unique_x_sets) > 1:
-            pass
-        table=pt(title='Xs Detected')
-        table.field_names=['index', 'length', 'head', 'tail']
-
-        for x in xlist:
-            ind=xlist.index(x)
-            table.add_row([ind,len(x), x[:3],x[-3:]])
-            mask = np.all(df==x, axis=1) #checks each row (sample) for whether or not the 'x' matches the row's x
-            match_idx=np.where(mask)[0].tolist()
-
-        #Calc per Column (Raman Shift)
-        mean=df.mean() #Series of means per Raman Shift
-        
-        std=df.std() #Series of stds per Raman Shift
-        #Define a threshold for IDing outliers
-        threshold=2.0
-        #ID the outliers for each column
-        outliers=(np.abs(df-mean) >  threshold*std) #bool DF, TRUE = original value is outlier
-        
-        #Display information on outliers
-        #...might need to add if any() statement
-
-        #Display Outliers
-        series=outliers.stack() #Convert outliers (df) into a series w/ 2 index locations
-        truth=series[series==True] #Store True values (and loc) as a pd.series
-        outlier_loc=truth.index.tolist() #List of locs in df where an outlier is present
-        ids_with_outlier=list(set([l[0] for l in outlier_loc]))
-        # #Alt code: counts = Counter(ids_with_outlier) #(sample id, frequency)        
-        table=pt()
-        table.title='Outliers'
-        if len(ids_with_outlier)==0:
-            table.field_names=['There are no outliers in the remaining data!']
-        else:
-            table.field_names=['Sample ID','# Outliers','Outlier Values']
-            for sample in ids_with_outlier:
-                tups=[loc for loc in outlier_loc if loc[0]==sample]
-                values=[df.loc[loc] for loc in tups]
-                table.add_row([sample,len(values),values])
-        print(table)
-
-        #Add sample ids that have been id'ed to drop to the 'dead list'
-        for sample in dropped_id:
-            if sample not in self.dead_list:
-                self.dead_list.append(sample)
-        for sample in ids_with_outlier:
-            if sample not in self.dead_list:
-                self.dead_list.append(sample)
-
-        return mean
-
-    def FLAGintens(self):
-        # Will need to be updated to work with PreproSpectra class, rather than old `preprocess.py` 6-16-23
-        """
-        Returns a Pandas DataFrame of the preprocessed Raman spectra intensity data, with rows
-        corresponding to the sample ID and columns corresponding to the Raman shift index.
-
-        Returns:
-        --------
-        pandas.DataFrame:
-            DataFrame with rows corresponding to sample ID and columns corresponding to Raman shift index.
-        """
-        #Grab data from DB
-        rawres=self.grab_raw_data(self.y)
-        
-        #Filter rawres by removing any samples whos ID has been added to dead_list
-        res=[tup for tup in rawres if tup[0] not in self.dead_list]
-        
-        #Convert byte data to list data, then DF
-        tup_list=[(tup[0],self.blob2list(tup[1])) for tup in rawres]
-
-        # # test=[len(tup[1]) for tup in tup_list]
-        # # print(list(set(test)))
-        prepro_list=[(tup[0], preprocess.process(tup[1])) for tup in tup_list]        #Preprocess the data
-        data_dict={t[0]:t[1] for t in prepro_list}
-        df=pd.DataFrame.from_dict(data_dict,orient='index')
-        #DF with rows = sample id, columns = raman shift index
-        return df
-    
-    def apply_snv(self,df): #where each sample is a ROW
-        row_means=df.mean(axis=1) #Calculate the mean for each row
-        df_centered=df.sub(row_means, axis=0) #Subtract the row mean from each rs in the row
-        row_std=np.sqrt(df_centered.pow(2).sum(axis=1))/(df.shape[1]-1) #Calculate teh STD per row
-        result=df_centered.div(row_std,axis=0) #Divide each element in the row by the row standard deviation
-        return result
-    
-    def apply_snv(self,df):
-        res=np.zeros_like(df)
-    
-    def FLAGnames(self,id_list): #look at the mapnames function
-        '''Retrieves names corresponding to the index values of a DataFrame.
-
-        Args:
-            df (pandas.DataFrame): The DataFrame whose index values are used to retrieve the names.
-
-        Returns:
-            list: A list of names corresponding to the index values of the DataFrame.
-
-        Example:
-            >>> df = pd.DataFrame({'Col1': [1, 2, 3]}, index=['A', 'B', 'C'])
-            >>> obj = YourClassName()
-            >>> result = obj.names(df)
-            >>> print(result)
-            ['NameA', 'NameB', 'NameC']'''
-        id_list=list(id_list)
-        name_list=[self.label_dic()[id] for id in id_list]
-        return name_list
-
     def average_lists(self,*lists):
         '''Example:
         l1  =  [3,4,3]
@@ -639,6 +469,8 @@ class DataTable:
             print('\tRow index = sample ID || Column header = Raman Shift')
         return df.T 
 
+    # def by_dict(self,):
+
     def label_dict(self,*cols, val_as_tup=False, include_col_name=True,
                   drop_deadlisted=False, name_sep=', '): #original func(names)
         # Check for inputs
@@ -703,7 +535,8 @@ class PreproSpectra:
         Flag indicating whether to replace negative intensity values with 0. Default is True.
     """
     def __init__(self, original_intensity, raman_shifts=None,
-                 name=None, alerts=True, no_neg=True):
+                 name=None, alerts=True, no_neg=True,
+                 snv=True):
         
         self.y=original_intensity
         if raman_shifts is None:
@@ -718,7 +551,7 @@ class PreproSpectra:
             alert=''
             self.x=raman_shifts
         self.name=name
-        
+
         # Smoothing parameters
         self.smooth_window=9
         self.smooth_poly=3
@@ -728,17 +561,9 @@ class PreproSpectra:
         self.zap_threshold=5
 
         # Apply Zap
-        # self.spikes=self.detect_spikes(self.y)
-        # self.y_zap, =self.zap(self.y)
         zap, zap_text = self.zap(self.y)
         self.y_zap=zap
         alert+=zap_text
-        # try:
-        #     self.y_zap=self.zap(self.y)
-        #     alert+=f'Zap has been applied with threshold = {self.zap_threshold}, window = {self.zap_window}.\n'
-        # except IndexError: #Bias IndexError for when spike is detected at edges of data=
-        #     alert+=f'Zap step has been skipped.\n'
-        # #     self.y_zap=self.y
         
         # Apply Smooth
         self.y_zap_smooth=ss.savgol_filter(self.y_zap, self.smooth_window, self.smooth_poly)
@@ -746,7 +571,14 @@ class PreproSpectra:
 
         # Baseline
         self.baseline=py.pspline_asls(self.y_zap_smooth)[0]
-        Y=self.y_zap_smooth-self.baseline
+        y_base=self.y_zap_smooth-self.baseline
+
+        # SNV
+        if snv:
+            Y=self.snv(y_base)
+            alert+='SNV normalization applied to spectra.'
+        else:
+            Y=y_base
 
         # Return preprocessed data
         if no_neg:
@@ -880,6 +712,14 @@ class PreproSpectra:
         except TypeError:
             return nums, 'Zap step has been skipped.\n'
     
+    def snv(self,nums):
+        vals=np.array(nums)
+        ave=vals.mean() #Calculate the mean for the sample
+        centered=vals-ave #Subtract the mean from each intensity value
+        std=np.std(centered) #Calculate STD
+        res=centered/std#Divide each item in the centered list by the STD
+        return res
+
     def show(self):
         """
         Display the data before and after preprocessing.
@@ -926,27 +766,39 @@ class DataSet:
     '''
     df where index = sample ID and column = raman shift
     '''
-    def __init__(self, df, **params):
+    def __init__(self, df, 
+                 trunc_before=None,trunc_after=None,
+                 **params):
         n, n_rs = df.shape[0], df.shape[1]
 
         self.ids=df.index
         self.xax=df.columns
-        self.raw=df
 
-        self.df=self.prepro_df()
+        # Truncate
+        if trunc_before != None or trunc_after != None:
+            self.before=__utils__.closest_number(trunc_before, self.xax)
+            self.after=__utils__.closest_number(trunc_after, self.xax)
+            self.raw=self.truncate(df)    
+        else: # No truncate
+            self.raw=df
 
-    def prepro_df(self):
+        self.df=self.prepro_df(**params)
+        
+    def truncate(self, df):        
+        return df.truncate(before=self.before, after=self.after, axis='columns')
+
+    def prepro_df(self, **params):
         res=[]
         for i in self.ids:
-            d=pd.DataFrame(PreproSpectra(list(self.raw.loc[i]), alerts=False).get())
+            d=pd.DataFrame(PreproSpectra(list(self.raw.loc[i]), alerts=False, **params).get())
             d.columns=[i]
-            d.set_index([self.xax],inplace=True,drop=True)
+            d.set_index([self.raw.columns],inplace=True,drop=True)
             res.append(d)        
         return pd.concat(res,axis=1)
     
     def getdf(self):
-        return self.df
+        return self.df.T
         
     def __repr__(self):
-        return repr(self.df)
+        return repr(self.df.T)
     
