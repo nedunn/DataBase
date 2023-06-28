@@ -7,7 +7,7 @@ from prettytable import PrettyTable as pt
 from prettytable import ALL
 import preprocess
 from collections import Counter
-import __utils__
+import utils
 import scipy.signal as ss
 import pybaselines.spline as py
 # from scipy.sparse import csc_matrix, eye, diags #smooth.whitaker
@@ -16,41 +16,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 
-def unique_count(lst):
-    result={}
-    for item in lst:
-        if item in result:
-            result[item] += 1
-        else:
-            result[item]=1
-    return result
-
-def map_index(df,namedic): 
-    '''Replaces the index of a DataFrame with corresponding values from a dictionary.
-
-    Args:
-        df (pandas.DataFrame): The DataFrame for which the index is to be replaced.
-        namedic (dict): A dictionary containing the mapping of index values to new names.
-
-    Returns:
-        pandas.DataFrame: A copy of the input DataFrame with the index replaced by the corresponding
-        values from the dictionary.
-
-    Example:
-        >>> df = pd.DataFrame({'Col1': [1, 2, 3]}, index=[2, 3, 1])
-        >>> namedic = {1: 'A', 2: 'B', 3: 'C'}
-        >>> result = index_from_dic(df, namedic)
-        >>> print(result)
-           Col1
-        A     1
-        B     2
-        C     3'''
-    res=df.copy(deep=True)
-    res.index=res.index.map(namedic.get)
-    return res
-
 class DataTable:
-
+    ##EDIT add a `check col` function to ensure that columns are correctly input into 'label_dict'
     def __init__(self, db_path,table_name=None):
         #Connect to DB
         self.conn=sqlite3.connect(db_path)
@@ -80,12 +47,13 @@ class DataTable:
 
         #Track sample IDs that are dropped bc they are flagged with outliers
         self.dead_list=[] #IDs of samples
-        self.all_ids=self.get_ids()
+        if table_name is not None:
+            self.all_ids=self.get_ids()
 
     def __del__(self):
         '''Automaticallly close the database connection when the object is destroyed (program terminated).'''
         self.conn.close()
-            
+
     def query(self, stmt, params=None, fetch=True):
         if params is not None:
             self.cursor.execute(stmt, params)
@@ -432,21 +400,21 @@ class DataTable:
         rawres=self.grab_raw_data(self.x,self.y)
 
         #Filter rawres by removing any samples whos ID has been added to dead_list
-        # res=[tup for tup in rawres if tup[0] not in self.dead_list]
+        res=[tup for tup in rawres if tup[0] not in self.dead_list]
 
         #Convert byte data in raw tuples to list data
-        all_tup_list=[(tup[0],self.blob2list(tup[1]),self.blob2list(tup[2])) for tup in rawres]
+        all_tup_list=[(tup[0],self.blob2list(tup[1]),self.blob2list(tup[2])) for tup in res]
         
         # Make each spectra a dataframe with single row
         dfs=[]
         for tup in all_tup_list:
-            unique_index=__utils__.modify_duplicates(tup[1])
+            unique_index=utils.modify_duplicates(tup[1])
             df=pd.DataFrame(tup[2], index=unique_index, columns=[tup[0]])
             dfs.append(df)
 
         # # Check out `x`s
-        # summary=__utils__.summarize_lists([tup[1] for tup in all_tup_list])
-        #the ** happened to my function in __utils__??!?
+        # summary=utils.summarize_lists([tup[1] for tup in all_tup_list])
+        #the ** happened to my function in utils??!?
         # if show_x_summary:
         #     for xlst in summary:
         #         print(xlst)
@@ -468,8 +436,6 @@ class DataTable:
             print(stmt)
             print('\tRow index = sample ID || Column header = Raman Shift')
         return df.T 
-
-    # def by_dict(self,):
 
     def label_dict(self,*cols, val_as_tup=False, include_col_name=True,
                   drop_deadlisted=False, name_sep=', '): #original func(names)
@@ -536,7 +502,9 @@ class PreproSpectra:
     """
     def __init__(self, original_intensity, raman_shifts=None,
                  name=None, alerts=True, no_neg=True,
-                 snv=True):
+                 snv=True,
+                 smooth_window=9, smooth_poly=3, zap_window=2, zap_threshold=5,
+                 **params):
         
         self.y=original_intensity
         if raman_shifts is None:
@@ -553,12 +521,12 @@ class PreproSpectra:
         self.name=name
 
         # Smoothing parameters
-        self.smooth_window=9
-        self.smooth_poly=3
+        self.smooth_window=smooth_window
+        self.smooth_poly=smooth_poly
         
         # Zap parameters
-        self.zap_window=2
-        self.zap_threshold=5
+        self.zap_window=zap_window
+        self.zap_threshold=zap_threshold
 
         # Apply Zap
         zap, zap_text = self.zap(self.y)
@@ -587,6 +555,8 @@ class PreproSpectra:
         else:
             self.Y=Y
             alert+='Intensity returned with negative values.\n\t**Set `no_neg` to `True` to remove negatives.\n'
+
+        # self.__dict__.update(params)
 
         # Display alerts
         if alerts:
@@ -776,8 +746,8 @@ class DataSet:
 
         # Truncate
         if trunc_before != None or trunc_after != None:
-            self.before=__utils__.closest_number(trunc_before, self.xax)
-            self.after=__utils__.closest_number(trunc_after, self.xax)
+            self.before=utils.closest_number(trunc_before, self.xax)
+            self.after=utils.closest_number(trunc_after, self.xax)
             self.raw=self.truncate(df)    
         else: # No truncate
             self.raw=df
@@ -802,3 +772,143 @@ class DataSet:
     def __repr__(self):
         return repr(self.df.T)
     
+class Spectral:
+    """
+    A class for calculating means and standard deviations of rows in a DataFrame based on given indexes.
+    
+    Attributes:
+        df (pandas.DataFrame): The DataFrame containing the data to be analyzed.
+        ave_index_dict (dict): A dictionary specifying the indexes to be averaged by group name.
+        ave_dict (dict): A dictionary with index keys as keys and tuples of mean values and standard deviations as values.
+
+    Methods:
+        calc_ave_std_dict(): Calculates the means and standard deviations of rows in a DataFrame based on given indexes.
+    
+    """
+    def __init__(self, data_df, 
+                 averaging_dict=None, # key = group name, value = list of data_df indexes (sample IDs) to average by
+                 **kwargs):
+
+        self.df = data_df
+
+        if averaging_dict is not None:
+            self.ave_index_dict=averaging_dict
+        else:
+            print('A dictionary must still be given for this function to work.')
+            print('Dict key = group name (baed on columns from database), value = list of sample IDs (as assigned in database) that fall under the given label/group.')
+        
+        self.ave_dict=self.calc_ave_std_dict()
+
+        self.groups=self.list_groups()
+        
+
+    def calc_ave_std_dict(self):
+        """Calculates the means and standard deviations of rows in a DataFrame based on given indexes.
+        
+        Returns a dictionary where each key corresponds to an index key and its value is a tuple
+        containing the mean values and standard deviations of the rows for that key.
+        
+        Returns:
+            dict: A dictionary with index keys as keys and tuples of mean values and standard deviations as values.
+        """
+        res={}
+        for key, ids in self.ave_index_dict.items():    
+            # Perform calculations
+            rows=self.df.loc[ids]
+            means=rows.mean()
+            stds=rows.std()
+
+            # Save calclations to new dictionary
+            res[key] = (means.tolist(), stds.tolist())
+        return res
+    
+    def list_groups(self):
+        return(list(set(self.ave_index_dict.keys())))
+    
+    def get(self):
+        return(self.ave_dict)
+
+class Traces:
+    def __init__(self,spect_dict,raman_shifts,
+                 selected_groups=None, set_dict=None,
+                 show_std=False):
+        self.dict=spect_dict #Key is averaged spectra label, value = (mean, std)
+        self.rs=raman_shifts
+
+        # Identify traces to build based on groups
+            #group=key from self.dict
+        self.groups=list(set(self.dict.keys()))
+        if selected_groups is not None:    #User selected groups to plot
+            self.selected_groups=selected_groups #Note: the order of listed groups should dictate plotting order
+        else:
+            self.selected_groups = self.groups
+
+        self.set_dict=set_dict
+        if self.set_dict is not None:
+            self.sets=set_dict.keys()
+
+        # Trace attributes
+        self.show_std=show_std
+        self.subplots=True
+
+    def key_trace(self, key):
+        '''Returns Plotly Figure Trace Data relating to a key (group name) from the input spectral dictionary'''
+        trace=go.Figure()
+        ave=pd.Series(self.dict[key][0])
+        std=pd.Series(self.dict[key][1])
+        # Make Trace Data
+        if self.show_std: #UNFINISHED set up for appying standard deviation
+            trace.add_trace(go.Scatter(x=self.rs, y=ave + std, mode='lines', name='upper bound', line=dict(color='lightgrey')))
+            trace.add_trace(go.Scatter(x=self.rs, y=ave, name=key))
+            trace.add_trace(go.Scatter(x=self.rs, y=ave - std, mode='lines', name='lower bound', line=dict(color='lightgrey')))
+        
+        else:
+            trace.add_trace(go.Scatter(x=self.rs, y=ave, name=key))
+        return trace.data
+
+    def plot_single(self):
+        '''Returns figure with all groups on the same plot'''
+        traces=[]
+        for group in self.selected_groups:
+            traces.extend(self.key_trace(group))
+        return go.Figure(traces)
+
+    def plot_per_key(self):
+        '''Returns figures with each group on its own'''
+        for i, group in enumerate(self.selected_groups):
+            trace=self.key_trace(group)
+            fig=go.Figure(trace)
+            fig.update_layout(title=group)
+            fig.show()
+            # fig.add_trace(trace,row=i+1, col=1)
+    
+    def subplots(self):
+        '''Returns a figure with each group as its own subplot'''
+        fig=make_subplots(rows=len(self.selected_groups), cols=1,
+                          shared_xaxes=True,
+                          vertical_spacing=0.01)
+        
+        for i, group in enumerate(self.selected_groups):
+            traces=self.key_trace(group)
+            for trace in traces:
+                fig.add_trace(trace,row=i+1,col=1)
+        return fig
+            
+    def set_subplots(self):
+        '''Returns figure with each subplot a SET as defined by set_dict'''
+        if self.set_dict is None:
+            return 'A set_dict must be provided to use the `set_subplot` function.'
+        plot_list=self.set_dict.keys()
+
+        fig=make_subplots(rows=len(plot_list), cols=1,
+                          shared_xaxes=True,
+                          subplot_titles=list(self.sets))
+
+        #Traces per subplot
+        for i, set_name in enumerate(self.set_dict):
+            trace_names=self.set_dict[set_name]
+            for name in trace_names:
+                traces=self.key_trace(name)
+                for trace in traces:
+                    fig.add_trace(trace, row=i+1, col=1)
+        return fig
