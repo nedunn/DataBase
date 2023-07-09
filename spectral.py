@@ -45,6 +45,7 @@ def oversat_check(spectrum, threshold=0.1, window=5):
 class Spectral:
     def __init__(self, data_df, raman_shifts, name_dict=None, set_dict=None, 
                  color_dict=None,
+                 ave_dict=None,
                  **kwargs):
 
         self.df = data_df
@@ -52,6 +53,12 @@ class Spectral:
         
         self.color_dict=color_dict
         
+        #Dictionaries were key=label, values=sample ids
+        self.ave = ave_dict
+
+        if ave_dict is not None:
+            self.ave_df=self.get_averaged_df()
+
         if name_dict:
             self.name_dict = name_dict
             self.groups=self.get_groups()
@@ -278,6 +285,7 @@ class Spectral:
         return fig
     
     def add_peaks(self, fig, x_vals, y_vals, labels):
+        
         trace=go.Scatter(
             x=x_vals, y=y_vals,
             mode='markers',
@@ -323,23 +331,159 @@ class Spectral:
             fig=self.format_fig(fig)
             return fig
 
-    # def single_plot(self, sets='all'):
-    #     if sets == 'all':
-    #         datas = self.ave_spectra(self.groups)
-    #     else:
-    #         if self.sets and sets in self.sets:
-    #             print('1')
-    #             group_list = self.sets[sets]
-    #             print(group_list)
-    #         else:
-    #             print('2')
-    #             group_list = sets
+    def get_averaged_df(self):
+        dfs=[]
+        if self.ave != None:
+            for group_name in self.ave.keys():
+                ids=list(self.ave[group_name])
+                subdf=self.df.loc[ids]
+                ave=subdf.mean()
+                ave.name=group_name
+                dfs.append(ave)
+            return pd.concat(dfs,axis=1).T
+        else:
+            return '`get_averaged_df() requries an averaging dictionary for the instance.\nKey=averaged group label, values=sample ids'
+    
+    def ave_dict(self):
+        pass
+
+class Spectral:
+    """
+    A class for calculating means and standard deviations of rows in a DataFrame based on given indexes.
+    
+    Attributes:
+        df (pandas.DataFrame): The DataFrame containing the data to be analyzed.
+        ave_index_dict (dict): A dictionary specifying the indexes to be averaged by group name.
+        ave_dict (dict): A dictionary with index keys as keys and tuples of mean values and standard deviations as values.
+
+    Methods:
+        calc_ave_std_dict(): Calculates the means and standard deviations of rows in a DataFrame based on given indexes.
+    
+    """
+    def __init__(self, data_df, 
+                 averaging_dict=None, # key = group name, value = list of data_df indexes (sample IDs) to average by
+                 **kwargs):
+
+        self.df = data_df
+
+        if averaging_dict is not None:
+            self.ave_index_dict=averaging_dict
+        else:
+            print('A dictionary must still be given for this function to work.')
+            print('Dict key = group name (baed on columns from database), value = list of sample IDs (as assigned in database) that fall under the given label/group.')
+        
+        self.ave_dict=self.calc_ave_std_dict()
+
+        self.groups=self.list_groups()
+        
+
+    def calc_ave_std_dict(self):
+        """Calculates the means and standard deviations of rows in a DataFrame based on given indexes.
+        
+        Returns a dictionary where each key corresponds to an index key and its value is a tuple
+        containing the mean values and standard deviations of the rows for that key.
+        
+        Returns:
+            dict: A dictionary with index keys as keys and tuples of mean values and standard deviations as values.
+        """
+        res={}
+        for key, ids in self.ave_index_dict.items():    
+            # Perform calculations
+            rows=self.df.loc[ids]
+            means=rows.mean()
+            stds=rows.std()
+
+            # Save calclations to new dictionary
+            res[key] = (means.tolist(), stds.tolist())
+        return res
+    
+    def list_groups(self):
+        return(list(set(self.ave_index_dict.keys())))
+    
+    def get(self):
+        return(self.ave_dict)
+
+class Traces:
+    def __init__(self,spect_dict,raman_shifts,
+                 selected_groups=None, set_dict=None,
+                 show_std=False):
+        self.dict=spect_dict #Key is averaged spectra label, value = (mean, std)
+        self.rs=raman_shifts
+
+        # Identify traces to build based on groups
+            #group=key from self.dict
+        self.groups=list(set(self.dict.keys()))
+        if selected_groups is not None:    #User selected groups to plot
+            self.selected_groups=selected_groups #Note: the order of listed groups should dictate plotting order
+        else:
+            self.selected_groups = self.groups
+
+        self.set_dict=set_dict
+        if self.set_dict is not None:
+            self.sets=set_dict.keys()
+
+        # Trace attributes
+        self.show_std=show_std
+        self.subplots=True
+
+    def key_trace(self, key):
+        '''Returns Plotly Figure Trace Data relating to a key (group name) from the input spectral dictionary'''
+        trace=go.Figure()
+        ave=pd.Series(self.dict[key][0])
+        std=pd.Series(self.dict[key][1])
+        # Make Trace Data
+        if self.show_std: #UNFINISHED set up for appying standard deviation
+            trace.add_trace(go.Scatter(x=self.rs, y=ave + std, mode='lines', name='upper bound', line=dict(color='lightgrey')))
+            trace.add_trace(go.Scatter(x=self.rs, y=ave, name=key))
+            trace.add_trace(go.Scatter(x=self.rs, y=ave - std, mode='lines', name='lower bound', line=dict(color='lightgrey')))
+        
+        else:
+            trace.add_trace(go.Scatter(x=self.rs, y=ave, name=key))
+        return trace.data
+
+    def plot_single(self):
+        '''Returns figure with all groups on the same plot'''
+        traces=[]
+        for group in self.selected_groups:
+            traces.extend(self.key_trace(group))
+        return go.Figure(traces)
+
+    def plot_per_key(self):
+        '''Returns figures with each group on its own'''
+        for i, group in enumerate(self.selected_groups):
+            trace=self.key_trace(group)
+            fig=go.Figure(trace)
+            fig.update_layout(title=group)
+            fig.show()
+            # fig.add_trace(trace,row=i+1, col=1)
+    
+    def subplots(self):
+        '''Returns a figure with each group as its own subplot'''
+        fig=make_subplots(rows=len(self.selected_groups), cols=1,
+                          shared_xaxes=True,
+                          vertical_spacing=0.01)
+        
+        for i, group in enumerate(self.selected_groups):
+            traces=self.key_trace(group)
+            for trace in traces:
+                fig.add_trace(trace,row=i+1,col=1)
+        return fig
             
-    #     #     selected_data = {group: self.groups[group] for group in group_list if group in self.groups}
-    #     #     datas = self.ave_spectra(selected_data)
-        
-    #     # traces = self.generate_traces(datas)
-    #     # fig = go.Figure(traces)
-        
-    #     # fig = self.format_fig(fig)
-    #     return fig
+    def set_subplots(self):
+        '''Returns figure with each subplot a SET as defined by set_dict'''
+        if self.set_dict is None:
+            return 'A set_dict must be provided to use the `set_subplot` function.'
+        plot_list=self.set_dict.keys()
+
+        fig=make_subplots(rows=len(plot_list), cols=1,
+                          shared_xaxes=True,
+                          subplot_titles=list(self.sets))
+
+        #Traces per subplot
+        for i, set_name in enumerate(self.set_dict):
+            trace_names=self.set_dict[set_name]
+            for name in trace_names:
+                traces=self.key_trace(name)
+                for trace in traces:
+                    fig.add_trace(trace, row=i+1, col=1)
+        return fig

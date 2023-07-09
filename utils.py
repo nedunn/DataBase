@@ -3,6 +3,45 @@ import pandas as pd
 from collections import Counter
 from prettytable import PrettyTable
 import numpy as np
+import plotly.graph_objects as go
+
+def save_fig(fig, path='/mnt/c/Users/16162/Desktop/temp/',name='temp_fig', type='.svg',width=1600,height=1200):
+    """
+    Saves a figure object as an image file, default file type is .svg.
+
+    Parameters:
+        fig (plotly.graph_objects.Figure): The figure object to be saved.
+        path (str): The path to the directory where the file will be saved. Defaults to '/mnt/c/Users/16162/Desktop/temp/'.
+        name (str): The name of the file to be saved. Defaults to 'temp_fig'.
+        type (str): The file extension/type of the saved file. Defaults to '.svg'.
+        width (int): The width of the saved image in pixels. Defaults to 1600.
+        height (int): The height of the saved image in pixels. Defaults to 1200.
+
+    Returns:
+        str: A message indicating the status of the save operation.
+
+    Raises:
+        FileNotFoundError: If the specified path does not exist.
+
+    """
+    override_ans='yes'
+    savefile_path=f'{path}{name}{type}'
+    
+    # Check path
+    if os.path.isdir(path) == False:
+        return 'Save To Path Error: looks like the path doesnt exist. \n\tCheck that. \n\tIf path does exist... `\_()_/`'
+
+    # Check if file exists
+    if os.path.exists(savefile_path):
+        ans=input(f'The file name ({name}) already exists in the path you have specified.\n\tContinue and OVERRIDE previous file, type \'{override_ans}\'.\n\Press \'enter\' to abort save.')
+        if ans == override_ans:
+            fig.write_image(savefile_path, width=width, height=height)
+            return f'File was saved as {savefile_path}.'
+        else:
+            return 'File was not saved.'
+    else:
+        fig.write_image(savefile_path, width=width, height=height)
+        return f'File was saved as {savefile_path}.'
 
 def file_types(path):
     file_types=set()

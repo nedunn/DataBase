@@ -15,9 +15,7 @@ import pybaselines.spline as py
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-
 class DataTable:
-    ##EDIT add a `check col` function to ensure that columns are correctly input into 'label_dict'
     def __init__(self, db_path,table_name=None):
         #Connect to DB
         self.conn=sqlite3.connect(db_path)
@@ -675,7 +673,8 @@ class PreproSpectra:
                     w=np.arange(i-self.zap_window, i+1+self.zap_window) #Select 2m+1 points around the spike
                     w2=w[spikes[w]==0] #From the interval, choose the ones which are not spikes                
                     if not w2.any(): #Empty array
-                        y_out[i]=np.mean(nums[w]) #Average the values that are not spikes in the selected range        
+                        y_out[i]=np.mean(nums[w]) #Average the values that are not spikes in the selected range
+
                     if w2.any(): #Normal array
                         y_out[i]=np.mean(nums[w2]) #Average the values that are not spikes in the selected range
             return y_out, f'Zap has been applied with threshold = {self.zap_threshold}, window = {self.zap_window}.\n'
@@ -748,11 +747,15 @@ class DataSet:
         if trunc_before != None or trunc_after != None:
             self.before=utils.closest_number(trunc_before, self.xax)
             self.after=utils.closest_number(trunc_after, self.xax)
-            self.raw=self.truncate(df)    
+            self.raw=self.truncate(df)
+        elif trunc_before == None and trunc_after == None:
+            self.before=utils.closest_number(trunc_before, self.xax)
+            self.after=utils.closest_number(trunc_after, self.xax)
         else: # No truncate
             self.raw=df
 
         self.df=self.prepro_df(**params)
+        # self.df=self.test(**params) #For the truncation / zap troubleshooting issue *6-27*
         
     def truncate(self, df):        
         return df.truncate(before=self.before, after=self.after, axis='columns')
@@ -766,13 +769,24 @@ class DataSet:
             res.append(d)        
         return pd.concat(res,axis=1)
     
+    def test(self, **params):
+        res=[]
+        for i in self.ids:
+            d=pd.DataFrame(PreproSpectra(list(self.raw.loc[i]), alerts=False, **params).get())
+            # d=pd.DataFrame(list(self.raw.loc[i]))
+            d.columns=[i]
+            # d.set_index([self.raw.columns],inplace=True,drop=True)
+            print(d.shape)
+            # res.append(d)        
+        # return pd.concat(res,axis=1)
+
     def getdf(self):
         return self.df.T
         
     def __repr__(self):
         return repr(self.df.T)
     
-class Spectral:
+class Spectral: 
     """
     A class for calculating means and standard deviations of rows in a DataFrame based on given indexes.
     
@@ -801,7 +815,6 @@ class Spectral:
 
         self.groups=self.list_groups()
         
-
     def calc_ave_std_dict(self):
         """Calculates the means and standard deviations of rows in a DataFrame based on given indexes.
         
@@ -831,9 +844,12 @@ class Spectral:
 class Traces:
     def __init__(self,spect_dict,raman_shifts,
                  selected_groups=None, set_dict=None,
-                 show_std=False):
+                 show_std=False,
+                 peak_list=None):
         self.dict=spect_dict #Key is averaged spectra label, value = (mean, std)
         self.rs=raman_shifts
+        
+        self.peak_list=list(set(peak_list))
 
         # Identify traces to build based on groups
             #group=key from self.dict
@@ -850,6 +866,7 @@ class Traces:
         # Trace attributes
         self.show_std=show_std
         self.subplots=True
+        self.subplot_height=600
 
     def key_trace(self, key):
         '''Returns Plotly Figure Trace Data relating to a key (group name) from the input spectral dictionary'''
@@ -861,22 +878,25 @@ class Traces:
             trace.add_trace(go.Scatter(x=self.rs, y=ave + std, mode='lines', name='upper bound', line=dict(color='lightgrey')))
             trace.add_trace(go.Scatter(x=self.rs, y=ave, name=key))
             trace.add_trace(go.Scatter(x=self.rs, y=ave - std, mode='lines', name='lower bound', line=dict(color='lightgrey')))
-        
+            ytrace=trace['data'][1]['y'] #Access numpy array with `y` data for the spectra trace
         else:
             trace.add_trace(go.Scatter(x=self.rs, y=ave, name=key))
-        return trace.data
+            ytrace=trace['data'][0]['y']
+        ymax=np.max(ytrace)
+        #trace['layout']['yaxis']['autorange']
+        return trace.data, ymax
 
     def plot_single(self):
         '''Returns figure with all groups on the same plot'''
         traces=[]
         for group in self.selected_groups:
-            traces.extend(self.key_trace(group))
+            traces.extend(self.key_trace(group)[0])
         return go.Figure(traces)
 
     def plot_per_key(self):
         '''Returns figures with each group on its own'''
         for i, group in enumerate(self.selected_groups):
-            trace=self.key_trace(group)
+            trace=self.key_trace(group)[0]
             fig=go.Figure(trace)
             fig.update_layout(title=group)
             fig.show()
@@ -893,22 +913,80 @@ class Traces:
             for trace in traces:
                 fig.add_trace(trace,row=i+1,col=1)
         return fig
-            
+    
+
+
     def set_subplots(self):
         '''Returns figure with each subplot a SET as defined by set_dict'''
+        if self.peak_list is None:
+            return 'Error. This function has not been edited to work without a peaklist.'
         if self.set_dict is None:
             return 'A set_dict must be provided to use the `set_subplot` function.'
         plot_list=self.set_dict.keys()
 
         fig=make_subplots(rows=len(plot_list), cols=1,
-                          shared_xaxes=True,
+                        #   shared_xaxes=True,
+                        #   vertical_spacing=0.05,
                           subplot_titles=list(self.sets))
 
         #Traces per subplot
         for i, set_name in enumerate(self.set_dict):
-            trace_names=self.set_dict[set_name]
-            for name in trace_names:
-                traces=self.key_trace(name)
-                for trace in traces:
-                    fig.add_trace(trace, row=i+1, col=1)
+            subplot_number=i+1
+            trace_names=self.set_dict[set_name] #names of all traces to add to a particular subplot
+            ymaxs=[]
+            for name in trace_names: #Add each trace to the subplot
+                traces=self.key_trace(name) #returns a tuple, including the with tup[1] being the max y value
+                ymaxs.append(traces[1])
+                for trace in traces[0]: 
+                    fig.add_trace(trace, row=subplot_number, col=1)
+            ymax=max(ymaxs) #Get the highest `y` value from all the traces in the subplot
+            
+            for peak in self.peak_list:
+                fig=self.add_peaks(fig, peak, ymax, subplot_number)
+
+        return self.fig_format(fig,len(plot_list))
+
+    def add_peaks(self, fig, peak_x, peak_y, xref_number):
+        self.label_peak(fig, xref_number, peak_x, peak_y)
+        fig.add_shape(self.generate_line(peak_x, peak_y),row=xref_number, col=1)
         return fig
+    
+    def generate_line(self, peak_x, peak_y):
+        line=go.layout.Shape(type='line',
+                             x0=peak_x, x1=peak_x,
+                             y0=0, y1=peak_y,
+                             line=dict(color='black', width=0.7))
+        return line
+
+    def label_peak(self,fig, subplot_number, peak_x, peak_y, y_raise=1.4):
+        fig.add_annotation(yref=f'y{subplot_number}', #makes annoation `y` location relative to subplot axis
+                           x=peak_x,
+                           y=peak_y*y_raise,
+                           text=f'{peak_x}', textangle=-45,
+                           showarrow=False, align='center')
+
+    def fig_format(self, fig, multiplier):
+        #Add X Axis Label
+        fig.add_annotation(xref='paper',yref='paper',
+                    y=-0.15,
+                    text='Raman Shift (cm<sup>-1</sup>)',
+                    showarrow=False,
+                    font=dict(size=22)
+                    )
+        
+        #Add Y Axis Label
+        fig.add_annotation(xref='paper',yref='paper',
+                            x=-0.18,
+                            text='Raman Intensity',
+                            showarrow=False,
+                            textangle=270,
+                            font=dict(size=22)
+                            )
+        fig.update_layout(height=self.subplot_height + multiplier,
+                          template='simple_white',
+                          font=dict(family='Ariel', size=18))
+        
+
+
+        return fig
+    
