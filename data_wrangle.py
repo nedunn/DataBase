@@ -407,33 +407,55 @@ class DataTable:
         dfs=[]
         for tup in all_tup_list:
             unique_index=utils.modify_duplicates(tup[1])
-            df=pd.DataFrame(tup[2], index=unique_index, columns=[tup[0]])
-            dfs.append(df)
+            if unique_index[-1] == 4000.0: #problem solving pc12 dataset
+                print(tup[0])
+            #Initial df, ignore for now
+            # df=pd.DataFrame(tup[2], index=unique_index, columns=[tup[0]])
+            # dfs.append(df)
+        
+        xs=[utils.modify_duplicates(tup[1]) for tup in all_tup_list]
+        xdf=pd.DataFrame(xs)
+        xax1=np.around(xdf.mean(),2)
+        xax=utils.modify_duplicates(xax1)
+        print(xax)
 
-        # # Check out `x`s
-        # summary=utils.summarize_lists([tup[1] for tup in all_tup_list])
-        #the ** happened to my function in utils??!?
-        # if show_x_summary:
-        #     for xlst in summary:
-        #         print(xlst)
+
+
+        # Check out `x`s
+        summary=utils.num_list_summary([df.index.values for df in dfs])
+        if show_x_summary:
+            print('Number of lists: ', summary['num_lists'])
+            print('Number of unique lists: ',summary['num_unique_lists'])
+            for lst in summary['list_types']:
+                maxi=lst['max_value']
+                mini=lst['min_value']
+                print(f'\tMax value: {maxi}\n\tMin value: {mini}')                
+            
+            # print(f'Number of unique lists: {summary['num_unique_lists']}')
+        
         
         stmt=f'\tNumber of samples compiled: {len(dfs)}'
+        
+        # Check shape to make sure all spectra are the same length (have the same bumber of raman shifts)
+        # shapes=[df.shape for df in dfs]
+        
+        # df1=pd.merge(dfs,axis=1, ignore_index=True)
+        df1=pd.concat(dfs, axis=1, ignore_index=True)
+        
+        # stmt+=f'\n\tInitial dataset contains {df1.shape[0]} Raman Shifts and {df1.shape[1]} individual spectra.'
 
-        df1=pd.concat(dfs,axis=1)
-        stmt+=f'\n\tInitial dataset contains {df1.shape[0]} Raman Shifts and {df1.shape[1]} individual spectra.'
-
-        if dropnans:
-            df=df1.dropna()
-            stmt+=f'\n\tFinal DF contains {df.shape[0]} Raman Shifts and {df.shape[1]} individual spectra.'
-            stmt+=f'\n\t`NaN` values were removed.'
-        else:
-            df=df1
-            stmt+='\n\tDF returned with possible `NaN` values.'
-        if summary:
-            print('DataFrame Returned:')
-            print(stmt)
-            print('\tRow index = sample ID || Column header = Raman Shift')
-        return df.T 
+        # if dropnans:
+        #     df=df1.dropna()
+        #     stmt+=f'\n\tFinal DF contains {df.shape[0]} Raman Shifts and {df.shape[1]} individual spectra.'
+        #     stmt+=f'\n\t`NaN` values were removed.'
+        # else:
+        #     df=df1
+        #     stmt+='\n\tDF returned with possible `NaN` values.'
+        # if summary:
+        #     print('DataFrame Returned:')
+        #     print(stmt)
+        #     print('\tRow index = sample ID || Column header = Raman Shift')
+        # return df.T 
 
     def label_dict(self,*cols, val_as_tup=False, include_col_name=True,
                   drop_deadlisted=False, name_sep=', '): #original func(names)
@@ -764,6 +786,7 @@ class DataSet:
         res=[]
         for i in self.ids:
             d=pd.DataFrame(PreproSpectra(list(self.raw.loc[i]), alerts=False, **params).get())
+            print(d)
             d.columns=[i]
             d.set_index([self.raw.columns],inplace=True,drop=True)
             res.append(d)        

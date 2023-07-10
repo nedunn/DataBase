@@ -114,35 +114,45 @@ def count_duplicates(lst):
     return duplicate_counts
 
 def modify_duplicates(mylist):
-    """
-    Modifies the duplicate values in a list by replacing the second occurrence with the original value plus 0.5.
+    '''Modifies the duplicate values in a list by replacing each duplicate occurrence with a new list of rounded values.
 
     Args:
         mylist (list): The input list to modify.
 
     Returns:
-        list: A new list with the modifications applied.
+        list: A new list with the modifications applied. Duplicate values are replaced with rounded values.
 
     Examples:
-        >>> mylist = [638, 639, 640, 641, 641, 642, 643, 644, 645, 646, 647, 648, 649, 649, 650, 651]
+        >>> mylist = [1, 2, 3, 3, 4, 4, 4]
         >>> modified_list = modify_duplicates(mylist)
         >>> print(modified_list)
-        [638, 639, 640, 641, 641.5, 642, 643, 644, 645, 646, 647, 648, 649, 649.5, 650, 651]
-    """
+        [1, 2, 3, 3.5, 4, 4.5, 5]
+
+        >>> mylist = [1.25, 1.25, 1.25]
+        >>> modified_list = modify_duplicates(mylist)
+        >>> print(modified_list)
+        [1.25, 1.26, 1.27]'''
     modified_list = []
     duplicates = {}
-
+    #Inventory duplicates in list
     for item in mylist:
         if item in duplicates:
             duplicates[item] += 1
-            if duplicates[item] == 2:
-                modified_list.append(item + 0.5)
-            else:
-                modified_list.append(item)
         else:
             duplicates[item] = 1
+    #Build new list
+    for item in duplicates:
+        #Items with duplicates
+        if duplicates[item] > 1:
+            #Make list of replacement numbers for the duplicats
+            nums=np.linspace(item, item+.9, duplicates[item])
+            new_nums=np.around(nums,decimals=2) #round so that decimals arent crazy
+            #Add numbers to new list
+            for num in new_nums:
+                modified_list.append(num)
+        #Items without duplicates
+        elif duplicates[item]==1:
             modified_list.append(item)
-
     return modified_list
 
 def list_align(lst, target_value):
@@ -226,4 +236,16 @@ def map_index(df,namedic):
     res.index=res.index.map(namedic.get)
     return res
 
- 
+def num_list_summary(lst):
+    summary = {}
+    summary['num_lists'] = len(lst)
+    summary['list_types'] = [
+        {
+            'list': sublist,
+            'max_value': max(sublist),
+            'min_value': min(sublist),
+        }
+        for sublist in set(map(tuple, lst))
+    ]
+    summary['num_unique_lists'] = len(summary['list_types'])
+    return summary
